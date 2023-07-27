@@ -1,0 +1,34 @@
+﻿DbModel:
+    Database:
+        Name: Scc1
+
+    Models:
+        - AuditBase:
+            Attributes:
+                Id: { type: int, key: true, identity:true} 
+                AuditType: {type: int}
+                User: {type: string, length:100}
+                AuditDate: {type: date}
+                TableObjectId: {type: int}
+                KeyObjectId: {type: int}
+                IntKey: {type: int}
+                GuidKey: {type: guid}
+
+        - IntId:
+            Virtual: true #dont create a table for this type
+            Attributes:
+                Id: { type: int, key: true, identity:true}    
+        - ActorBase:
+            Inherits: IntId
+            ReferencedBy:
+                - AuditBase: {column: IntKey}
+
+        - Person:
+            Inherits: ActorBase
+            Includes:
+                Composites:
+                    - Name
+                Collections:
+                    - Address: {Discriminator: AddressType}
+                    - Phones: {Discriminator: PhoneType}
+                    - Emails: {Discriminator: EmailType}

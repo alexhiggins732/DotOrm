@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net6.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="System.ServiceModel.Primitives" Version="6.0.0" />
+
+		<ProjectReference Condition="'$(ExampleRefs)'=='local'" Include="..\..\..\src\protobuf-net.Grpc\protobuf-net.Grpc.csproj" />
+
+		<ProjectReference Include="..\DotOrmLib\DotOrmLib.csproj" />
+		<PackageReference Condition="'$(ExampleRefs)'=='nuget'" Include="protobuf-net.Grpc" />
+	</ItemGroup>
+</Project>

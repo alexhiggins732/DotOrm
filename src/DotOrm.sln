@@ -3,7 +3,17 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.33516.290
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotOrm", "DotOrm\DotOrm.csproj", "{D9A3C40B-9DF7-4147-9B09-83D854DD7140}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DotOrmCli", "DotOrmCli\DotOrmCli.csproj", "{CFD800A8-CD2A-4C98-8083-689B31FCE2AA}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DotOrmLib", "DotOrmLib\DotOrmLib.csproj", "{5315A802-185D-4D3A-AEB2-F2528DE2039E}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DotOrmTestModels", "DotOrmTestModels\DotOrmTestModels.csproj", "{0170E03D-3724-46D3-A17A-AC7DA7AFC6DC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotOrmEf", "DotOrmEf\DotOrmEf.csproj", "{49510846-3269-49DC-9AC0-62AFE629C051}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotOrmGrpcServer", "DotOrmGrpcServer\DotOrmGrpcServer.csproj", "{F8CCEFD9-5B51-4F25-BE0A-AF49B7076BC1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotOrmGrpcClient", "DotOrmGrpcClient\DotOrmGrpcClient.csproj", "{80E05A3B-BFDF-4122-BDA2-10C095910E70}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -11,10 +21,30 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{D9A3C40B-9DF7-4147-9B09-83D854DD7140}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{D9A3C40B-9DF7-4147-9B09-83D854DD7140}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{D9A3C40B-9DF7-4147-9B09-83D854DD7140}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{D9A3C40B-9DF7-4147-9B09-83D854DD7140}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CFD800A8-CD2A-4C98-8083-689B31FCE2AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CFD800A8-CD2A-4C98-8083-689B31FCE2AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CFD800A8-CD2A-4C98-8083-689B31FCE2AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CFD800A8-CD2A-4C98-8083-689B31FCE2AA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5315A802-185D-4D3A-AEB2-F2528DE2039E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5315A802-185D-4D3A-AEB2-F2528DE2039E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5315A802-185D-4D3A-AEB2-F2528DE2039E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5315A802-185D-4D3A-AEB2-F2528DE2039E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0170E03D-3724-46D3-A17A-AC7DA7AFC6DC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0170E03D-3724-46D3-A17A-AC7DA7AFC6DC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0170E03D-3724-46D3-A17A-AC7DA7AFC6DC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0170E03D-3724-46D3-A17A-AC7DA7AFC6DC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{49510846-3269-49DC-9AC0-62AFE629C051}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{49510846-3269-49DC-9AC0-62AFE629C051}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{49510846-3269-49DC-9AC0-62AFE629C051}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{49510846-3269-49DC-9AC0-62AFE629C051}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F8CCEFD9-5B51-4F25-BE0A-AF49B7076BC1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F8CCEFD9-5B51-4F25-BE0A-AF49B7076BC1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F8CCEFD9-5B51-4F25-BE0A-AF49B7076BC1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F8CCEFD9-5B51-4F25-BE0A-AF49B7076BC1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{80E05A3B-BFDF-4122-BDA2-10C095910E70}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80E05A3B-BFDF-4122-BDA2-10C095910E70}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80E05A3B-BFDF-4122-BDA2-10C095910E70}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{80E05A3B-BFDF-4122-BDA2-10C095910E70}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
