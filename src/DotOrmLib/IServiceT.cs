@@ -37,7 +37,7 @@ namespace DotOrmLib
     }
 
 
-    public interface IDapperRepoBase
+    public interface IDotOrmRepoBase
     {
         Task ExecuteAsync(string query, object? param = null, IDbTransaction? transaction = null, int? commandTimeout = null, CommandType? commandType = null);
         Task<TResult> ExecuteScalarASync<TResult>(string query, object? param = null, IDbTransaction? transaction = null, int? commandTimeout = null, CommandType? commandType = null);
@@ -123,22 +123,16 @@ namespace DotOrmLib
             return await Task.FromResult<TResult>(default);
         }
     }
-    public class DapperRepoBase : IDapperRepoBase
+    public class DotOrmRepoBase : IDotOrmRepoBase
     {
 
 
         protected string? connectionString;
-
-        public DapperRepoBase(IConfiguration config, string connstringName)
-            : this(config.GetConnectionString(connstringName))
+        public DotOrmRepoBase(string connectionString)
         {
-
-        }
-        public DapperRepoBase(string connectionString)
-        {
-
             this.connectionString = connectionString;
         }
+
         public async Task ExecuteAsync(string query, object? param = null, IDbTransaction? transaction = null, int? commandTimeout = null, CommandType? commandType = null)
         {
             using (var conn = new SqlConnection(connectionString))
@@ -188,7 +182,7 @@ namespace DotOrmLib
         }
 
     }
-    public class DapperRepoBase<T> : DapperRepoBase, IRepo<T>, IDapperRepoBase
+    public class DotOrmRepo<T> : DotOrmRepoBase, IRepo<T>, IDotOrmRepoBase
         where T : class
     {
         public SqlTableDef Model;
@@ -199,11 +193,11 @@ namespace DotOrmLib
         private string selectClause;
 
 
-        public DapperRepoBase(string connectionString)
+        public DotOrmRepo(string connectionString)
             : base(connectionString)
         {
             Model = ModelFactory.GetSchema<T>();
-
+            tableName = Model.TableName;
             identityColumn = Model.Columns.FirstOrDefault(x => x.IsIdentity);
 
             if (identityColumn is not null)

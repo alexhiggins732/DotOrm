@@ -4,9 +4,10 @@ using System.Data.Common;
 using System.Data;
 using System.Runtime.Serialization;
 using System.ServiceModel;
+using DotOrmLib.Proxy.Scc1.Services;
+using DotOrmLib.GrpcServices;
 
-
-namespace DotOrmLib.Proxy;
+namespace DotOrmLib.Proxy.ILRuntime;
 
 
 

@@ -3,13 +3,15 @@ using DotOrmLib;
 using DotOrmLib.Proxy;
 using DotOrmLib.Sql;
 using System.Reflection.Emit;
-using FlowControl = DotOrmLib.Proxy.FlowControl;
+using FlowControl = DotOrmLib.Proxy.ILRuntime.FlowControl;
+using TestModel = DotOrmLib.Proxy.ILRuntime.TestModel;
 namespace DotOrm
 {
     internal class Program
     {
         static async Task Main(string[] args)
         {
+            var cn = ConnectionStringProvider.Create();
             Console.WriteLine("Hello, World!");
             ScaffoldDb("Scc1");
             await TestDynamic();
@@ -18,10 +20,10 @@ namespace DotOrm
 
         private static void ScaffoldDb(string dbName)
         {
-            var conn = $"Server=localhost;Database={dbName};Persist Security Info=True;Trusted_Connection=True;TrustServerCertificate=True;";
+            var conn = ConnectionStringProvider.Create(dbName).ConnectionString;
 
 
-            var def = DotOrmLib.Sql.ModelBuilder.GetDbSchema(conn, dbName);
+            var def = DotOrmLib.Sql.ModelBuilder.GetDbSchema(dbName);
 
 
             var modelDirectory = GetModelDirectory();
@@ -35,9 +37,9 @@ namespace DotOrm
         static async Task TestDynamic()
         {
             var conn = ConnectionStringProvider.Create("ILRuntime").ConnectionString;
-            var model = ModelBuilder.GetTableDefinition<TestModel>(conn);
+            var model = ModelBuilder.GetTableDefinition<DotOrmLib.Proxy.ILRuntime.TestModel>(conn);
             var whereParam = new { Name = "Branch" };
-            var repo = new DapperRepoBase<DotOrmLib.Proxy.TestModel>(conn);
+            var repo = new DotOrmRepo<DotOrmLib.Proxy.ILRuntime.TestModel>(conn);
             var result = await repo.Get(whereParam);
 
             var byId = await repo.GetById(result.First().Id);
@@ -102,14 +104,11 @@ namespace DotOrm
 
         private static void CreateTableDef(string dbName, string tableName)
         {
-            var conn = $"Server=localhost;Database={dbName};Persist Security Info=True;Trusted_Connection=True;TrustServerCertificate=True;";
-
-
-            var def = DotOrmLib.Sql.ModelBuilder.GetTableDefinition(conn, tableName);
+            var def = DotOrmLib.Sql.ModelBuilder.GetTableDefinition(tableName);
             var code = def.GenerateCSharpModel();
             Console.WriteLine(code);
 
-            def = DotOrmLib.Sql.ModelBuilder.GetTableDefinition(conn, "OpCode");
+            def = DotOrmLib.Sql.ModelBuilder.GetTableDefinition("OpCode");
             code = def.GenerateCSharpModel();
             Console.WriteLine(code);
 

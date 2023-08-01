@@ -1,4 +1,5 @@
 ﻿using DotOrmLib.Sql;
+using Microsoft.Extensions.Configuration.Json;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -31,23 +32,7 @@ namespace DotOrmLib
         public List<EntityModel> Composites { get; set; } = new();
         public Dictionary<string, EntityModel> Collections = new();
     }
-    public interface IConnectionStringProvider
-    {
-        string ConnectionString { get; set; }
-    }
-    public class ConnectionStringProvider : IConnectionStringProvider
-    {
-        public ConnectionStringProvider(string connectionString)
-        {
-            ConnectionString = connectionString;
-        }
-        public string ConnectionString { get; set; } = null!;
 
-        public static ConnectionStringProvider Create(string dbName)
-        {
-            return new ConnectionStringProvider($"Server=localhost;Database={dbName};Persist Security Info=True;Trusted_Connection=True;TrustServerCertificate=True;");
-        }
-    }
     namespace Sql
     {
         using Dapper;
@@ -73,16 +58,12 @@ namespace DotOrmLib
             public static ConcurrentDictionary<Type, string> schemaMap;
             public static ConcurrentDictionary<PropertyInfo, ColumnDef?> columnMap;
             public static ConcurrentDictionary<PropertyInfo, ForeignKeyDef?> fkMap;
-            public static IConnectionStringProvider connectionStringProvider;
             static ModelFactory()
             {
                 schemas = new();
                 schemaMap = new();
                 columnMap = new();
                 fkMap = new();
-                connectionStringProvider = ConnectionStringProvider.Create("Scc1");
-
-
             }
 
             public static bool ContainsTableName<T>()
@@ -127,11 +108,10 @@ namespace DotOrmLib
 
             public static SqlTableDef GetSchema<T>()
             {
-                return schemas.GetOrAdd(GetTableName<T>(), (t) => GetModelDefinition<T>(connectionStringProvider.ConnectionString));
-
+                return schemas.GetOrAdd(GetTableName<T>(), (t) => GetModelDefinition<T>());
             }
 
-            private static SqlTableDef GetModelDefinition<T>(string connectionString)
+            private static SqlTableDef GetModelDefinition<T>()
             {
                 var tableAtt = GetCustomAttributes<T, TableAttribute>().FirstOrDefault();
                 if (tableAtt != null)
@@ -161,18 +141,18 @@ namespace DotOrmLib
                             IsForeignKey = fk?.Table is not null,
                             IsUnique = def?.IsUnique ?? false,
                             SqlDbType = def?.SqlDbType ?? ModelBuilder.GetSqlDbType(propType),
-                            MaxLength = def?.MaxLength??0,
-                            ForeignKeyTableName = fk?.Table?? string.Empty,
+                            MaxLength = def?.MaxLength ?? 0,
+                            ForeignKeyTableName = fk?.Table ?? string.Empty,
                             ForeignKeyColumnName = fk?.Column ?? string.Empty,
                             ForeignKeyConstraintName = fk?.Name ?? string.Empty,
-                            DefaultDbValue =def?.DefaultDbValue,
+                            DefaultDbValue = def?.DefaultDbValue,
                             ColumnIndex = def?.Order ?? idx,
                         };
                         columnDef.CSharpType = ModelBuilder.GetClrType(columnDef);
                     }
                 }
                 return
-                    ModelBuilder.GetTableDefinition<T>(connectionStringProvider.ConnectionString);
+                    ModelBuilder.GetTableDefinition<T>();
             }
 
             public static void Add(string tableName, SqlTableDef table)
@@ -183,8 +163,12 @@ namespace DotOrmLib
         }
         public class ModelBuilder
         {
+            public static SqlDbSchema GetDbSchema(string dbName)
+            {
+                return GetDbSchema(ConnectionStringProvider.Create().ConnectionString, dbName);
+            }
 
-            public static SqlDbSchema GetDbSchema(string connectionString, string dbName)
+            private static SqlDbSchema GetDbSchema(string connectionString, string dbName)
             {
                 var def = new SqlDbSchema(dbName);
                 List<DbSchemaModel> columnModels = null!;
@@ -329,8 +313,10 @@ select * from #DbModel order by TableName, ColumnName, ColumnIndex
                     return tables;
                 }
             }
+            public static SqlTableDef GetTableDefinition(string tableName)
+                => GetTableDefinition(ConnectionStringProvider.Create().ConnectionString, tableName);
 
-            public static SqlTableDef GetTableDefinition(string connectionString, string tableName)
+            private static SqlTableDef GetTableDefinition(string connectionString, string tableName)
             {
 
                 SqlTableDef tableDef = new SqlTableDef() { TableName = tableName };
@@ -459,6 +445,8 @@ left join sys.tables refTable on refCol.object_id= refTable.object_id
             }
 
 
+            public static SqlTableDef GetTableDefinition<T>()
+                => GetTableDefinition<T>(ConnectionStringProvider.Create().ConnectionString);
 
             public static SqlTableDef GetTableDefinition<T>(string connectionString)
             {

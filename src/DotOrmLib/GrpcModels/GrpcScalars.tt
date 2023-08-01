@@ -1,0 +1,100 @@
+﻿<#@ template debug="false" hostspecific="true" language="C#" #>
+<#@ assembly name="System.Runtime.Serialization" #>
+<#@ assembly name="System.Linq" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.Runtime.Serialization" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Linq" #>
+
+<#@ output extension=".cs" #>
+
+<# 
+    // Define the list of type names for which data contracts will be generated
+    Dictionary<string, string> typeNames = new() 
+    {
+        {"byte", "Byte"},
+        {"sbyte", "SByte"},
+        {"short", "Short"},
+        {"ushort", "UShort"},
+        {"int", "Int"},
+        {"uint", "UInt"},
+        {"long", "Long"},    
+        {"ulong", "ULong"},   
+        {"float", "Float"},    
+        {"double", "Double"},      
+        {"decimal", "Decimal"},      
+        {"BigInteger", "BigInteger"},  
+        {"DateTime", "DateTime"},          
+        {"DateTimeOffset", "DateTimeOffset"},  
+        {"string", "String"},  
+        {"bool", "Boolean"},
+        {"char", "Char"}, 
+        {"Guid", "Guid"}, 
+
+        {"byte?", "NullableByte"},
+        {"sbyte?", "NullableSByte"},
+        {"short?", "NullableShort"},
+        {"ushort?", "NullableUShort"},
+        {"int?", "NullableInt"},
+        {"uint?", "NullableUInt"},
+        {"long?", "NullableLong"},    
+        {"ulong?", "NullableULong"},   
+        {"float?", "NullableFloat"},    
+        {"double?", "NullableDouble"},      
+        {"decimal?", "NullableDecimal"},      
+        {"BigInteger?", "NullableBigInteger"},  
+        {"DateTime?", "NullableDateTime"},          
+        {"DateTimeOffset?", "NullableDateTimeOffset"},  
+        {"string?", "NullableString"},  
+        {"bool?", "NullableBoolean"},
+        {"char?", "NullableChar"}, 
+        {"Guid?", "NullableGuid"}, 
+
+    };
+#>
+
+using System;
+using System.Runtime.Serialization;
+using System.ServiceModel;
+using System.Numerics;
+
+
+namespace DotOrmLib.GrpcModels
+{
+    public partial class GrpcScalars
+    {
+        <# foreach (var kvp in typeNames) 
+        {
+            var key = kvp.Key;
+            var value = kvp.Value;
+            var typeName = $"{value}Value";
+        #>
+
+        [DataContract]
+        public class <#= typeName #>
+        {
+            
+            [DataMember(Order = 1)]
+            public <#= key #> Value { get; set; }<# if( key == "string") {#> = null!; <# } #>
+
+            public <#= typeName #>() {}
+
+            public <#= typeName #>(<#= key #> value)
+            {
+                Value = value;
+            }
+
+            public static implicit operator <#= typeName #>(<#= key #> value)
+            {
+                return new() {Value = value};
+            }
+
+            public static implicit operator <#= key #>(<#= typeName #> value)
+            {
+                return value.Value;
+            }
+        }
+   <# } #>
+
+    }
+}

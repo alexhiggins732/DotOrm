@@ -24,7 +24,7 @@ namespace DotOrmLib
         where T : class
     {
         private readonly List<string> _whereConditions;
-        private DapperRepoBase<T> repo;
+        private DotOrmRepo<T> repo;
         private Dictionary<string, object?> parameters;
         public async Task<List<T>> ToList()
         {
@@ -32,7 +32,7 @@ namespace DotOrmLib
         }
 
 
-        public WhereClauseBuilder(Expression<Func<T, bool>> expression, DapperRepoBase<T> repo)
+        public WhereClauseBuilder(Expression<Func<T, bool>> expression, DotOrmRepo<T> repo)
         {
             this.repo = repo;
             this.parameters = new();
@@ -85,7 +85,7 @@ namespace DotOrmLib
             where T : class
         {
             private readonly StringBuilder _sb = new StringBuilder();
-            private DapperRepoBase<T> repo;
+            private DotOrmRepo<T> repo;
             private WhereClauseBuilder<T> builder;
 
 

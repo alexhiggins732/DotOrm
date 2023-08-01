@@ -1,4 +1,6 @@
-﻿using DotOrmLib.Proxy.Scc1.Services;
+﻿using DotOrmLib.GrpcModels.Services;
+using DotOrmLib.GrpcServices;
+using DotOrmLib.Proxy.Scc1.Services;
 using ProtoBuf.Grpc.Server;
 
 namespace DotOrmGrpcServer
@@ -23,6 +25,7 @@ namespace DotOrmGrpcServer
             // Configure the HTTP request pipeline.
             app.MapGrpcService<HealthCheckService>();
             app.MapGrpcService<TblScoringController>();
+            app.MapGrpcService<GrpcScalarTestService>();
             app.MapGet("/Scc1/TblScoringController", () => "Communication with gRPC endpoints must be made through a gRPC client. To learn how to create a client, visit: https://go.microsoft.com/fwlink/?linkid=2086909");
 
             app.Run();

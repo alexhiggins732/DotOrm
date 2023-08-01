@@ -1,11 +1,15 @@
 ﻿using DotMpi;
 using DotOrmLib;
+using DotOrmLib.GrpcModels.Interfaces;
+using DotOrmLib.GrpcModels.Scalars;
+using DotOrmLib.GrpcServices;
 using DotOrmLib.Proxy;
 using DotOrmLib.Proxy.Scc1.Interfaces;
 using DotOrmLib.Proxy.Scc1.Services;
 using Grpc.Net.Client;
 using Microsoft.Data.SqlClient;
 using ProtoBuf.Grpc.Client;
+using System.Numerics;
 
 namespace DotOrmGrpcClient
 {
@@ -14,6 +18,33 @@ namespace DotOrmGrpcClient
         private static async Task Main(string[] args)
         {
             using var channel = GrpcChannel.ForAddress("https://localhost:57057/");
+
+            var scalarClient = channel.CreateGrpcService<IGrpcScalarTestService>();
+            var s = await scalarClient.EchoString("hello world");
+            var s1 = await scalarClient.EchoNullableString((string?)null);
+            var s2 = await scalarClient.EchoInt(1);
+            var s3 = await scalarClient.EchoNullableInt((int?)null);
+
+            string ts = await scalarClient.EchoString("hello world");
+            string? ts1 = await scalarClient.EchoNullableString((string?)null);
+            int ts2 = await scalarClient.EchoInt(1);
+            int? ts3 = await scalarClient.EchoNullableInt((int?)null);
+
+
+            //var b1 = await scalarClient.EchoBigInt(b);
+            BigInteger b = 1;
+
+
+
+            var bigSerializable = new GrpcValue<BigInteger>(b);
+            var br = await scalarClient.EchoGrpcValueOfBigInteger(bigSerializable);
+            var brValue = br.Item;
+            var bigSerializableT = new SerializableValue<BigInteger>(b);
+            var ba = (SerializableValue<BigInteger>)(await scalarClient.EchoRefOfSerializable(bigSerializableT));
+
+            var barray = new byte[] { 0, 1 };
+            var b2 = await scalarClient.EchoByteArray(barray);
+
             var client = channel.CreateGrpcService<IHealthCheckService>();
             var healthCheck = await client.HealthCheck();
             Console.WriteLine($"Health Check Result: {healthCheck.Result}");
