@@ -1,7 +1,12 @@
 ﻿using DotOrmLib.GrpcModels.Services;
 using DotOrmLib.GrpcServices;
+using DotOrmLib.Proxy.Scc1.Interfaces;
 using DotOrmLib.Proxy.Scc1.Services;
 using ProtoBuf.Grpc.Server;
+using System.Reflection.Emit;
+using System.Reflection;
+using System.ServiceModel;
+using DotOrmLib;
 
 namespace DotOrmGrpcServer
 {
@@ -9,8 +14,9 @@ namespace DotOrmGrpcServer
     {
         static void Main(string[] args)
         {
-      
 
+            var defaultconn = ConnectionStringProvider.Create("Scc1");
+            var ctl = new TblScoringController();
             var builder = WebApplication.CreateBuilder(args);
 
             // Additional configuration is required to successfully run gRPC on macOS.
@@ -20,7 +26,10 @@ namespace DotOrmGrpcServer
             builder.Services.AddCodeFirstGrpc();
 
             var app = builder.Build();
-            var ctl = new TblScoringController();
+            app.AddDynamicGrpcServiceFromTypeAssembly(typeof(IActionsController));
+
+            //AddServices(typeof(IActionsController));
+
 
             // Configure the HTTP request pipeline.
             app.MapGrpcService<HealthCheckService>();
@@ -30,5 +39,6 @@ namespace DotOrmGrpcServer
 
             app.Run();
         }
+
     }
 }

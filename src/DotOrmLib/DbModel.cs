@@ -672,9 +672,6 @@ left join sys.tables refTable on refCol.object_id= refTable.object_id
 
         public class SqlColumnDef
         {
-
-
-
             public string Name { get; set; }
             public string PropertyName => Name.ToPropertyName();
             public bool IsNullable { get; set; }
@@ -690,6 +687,20 @@ left join sys.tables refTable on refCol.object_id= refTable.object_id
             public string ForeignKeyColumnName { get; set; }
             public string DefaultDbValue { get; internal set; }
             public int ColumnIndex { get; internal set; }
+
+
+            public string SqlColumnDefintionString()
+            {
+                var b = new StringBuilder();
+                b.Append($"[{Name}] {SqlDbType}");
+                if (b.Length != 0)
+                    b.Append($" ({MaxLength})");
+                if (IsNullable)
+                    b.Append(" NULL");
+                else
+                    b.Append(" NOT NULL");
+                return b.ToString();
+            }
 
             public string ColumnAttributeString()
             {

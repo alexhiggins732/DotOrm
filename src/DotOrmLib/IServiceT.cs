@@ -191,7 +191,8 @@ namespace DotOrmLib
         private string? idWhereClause;
         Func<T, dynamic>? idGetter = null;
         private string selectClause;
-
+        string defaultSort;
+        string idNotFoundErrorMessage;
 
         public DotOrmRepo(string connectionString)
             : base(connectionString)
@@ -205,229 +206,357 @@ namespace DotOrmLib
                 idWhereClause = $"[{identityColumn.Name}]=@id";
                 var prop = typeof(T).GetProperty(identityColumn.PropertyName);
                 idGetter = (entity) => new { Id = prop.GetValue(entity) };
+                defaultSort = $"[{identityColumn.Name}]";
             }
             else
             {
                 var keys = Model.Columns.Where(x => x.IsPrimaryKey);
                 if (keys.Any())
                 {
+                    if (keys.Count() == 1 && identityColumn is null)
+                    {
+                        identityColumn = keys.First();
+                        var prop = typeof(T).GetProperty(identityColumn.PropertyName);
+                        idGetter = (entity) => new { Id = prop.GetValue(entity) };
+                        defaultSort = $"[{identityColumn.Name}]";
+                    }
+                    else
+                    {
+
+                        defaultSort = string.Join(", ", keys.Select(key => $"[{key.Name}]"));
+                    }
                     idWhereClause = string.Join(" and ", keys.Select(key => $"[{key.Name}]=@{key.PropertyName}"));
                     //idGetter = (entity) => new { }
                 }
                 else
                 {
-                    throw new Exception($"Failed to find id or key columns for model {Model.TableName}");
+                    //idNotFoundErrorMessage = $"Failed to find id or key columns for model {Model.TableName}";
+                    //throw new Exception($"Failed to find id or key columns for model {Model.TableName}");
+                    defaultSort= string.Join(", ", keys.Select(key => $"[{key.Name}]"));
                 }
             }
             var selectClauses = Model.Columns.Select(x => $"[{x.Name}] as [{x.PropertyName}]");
             this.selectClause = $"select {string.Join(", ", selectClauses)} from [{Model.TableName}]";
         }
+
+
+        private string? insertQuery = null;
+        private string GetInsertQuery()
+        {
+            if (insertQuery is null)
+            {
+                var sb = new StringBuilder();
+                var insertedColumnDefs = Model.Columns.Select(x => x.SqlColumnDefintionString());
+                sb.AppendLine($"declare @inserted table({string.Join(",", insertedColumnDefs)})");
+
+                var insertColumns = Model.Columns.Where(x => !x.IsIdentity);
+
+                var insertColumnClause = string.Join(", ", insertColumns.Select(x => $"[{x.Name}]"));
+                var valuesClause = string.Join(",", insertColumns.Select(x => $"@{x.PropertyName}"));
+                var insertedColumns = Model.Columns.Select(x => $"inserted.[{x.Name}]");
+                var outputClause = $"OUTPUT {string.Join(", ", insertedColumns)} INTO @inserted";
+                sb.AppendLine($"INSERT INTO [{Model.TableName}]({insertColumnClause})\r\n{outputClause}\r\nVALUES ({valuesClause})");
+                var selectClauses = Model.Columns.Select(x => $"[{x.Name}] as [{x.PropertyName}]");
+                var selectClause = $"select {string.Join(", ", selectClauses)} from @inserted";
+                sb.AppendLine(selectClause);
+                insertQuery = sb.ToString();
+            }
+            return insertQuery;
+
+        }
+
         public async Task<T> Add(T entity)
         {
-            var insertColumns = Model.Columns.Where(x => !x.IsIdentity);
-
-            var insertColumnClause = string.Join(", ", insertColumns.Select(x => $"[{x.Name}]"));
-            var valuesClause = string.Join(",", insertColumns.Select(x => $"@{x.PropertyName}"));
-            var scopeIdWhereClause = $"[{identityColumn.Name}]=@scopeId";
-            var query = $@"
-                INSERT INTO [{Model.TableName}]({insertColumnClause})
-                VALUES ({valuesClause})
-
-                declare @scopeId {identityColumn.SqlDbType} = SCOPE_IDENTITY();
-                {selectClause} where {scopeIdWhereClause}
-                ";
-
-            //.Select(x => $"[{model.TryGetColumnNameByProperty(x.Name)}] = @{x.PropertyName}");
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
 
-                await conn.OpenAsync();
-                var trans = await conn.BeginTransactionAsync();
+                /* 
+                OPTIONS: Insert entity and select based on
+                    1) scope_identity()
+                    2) primary keys
+                    3) unique
+                    4) row scan using insert table
+                
+                NOTES:
+                    Cache query based on model. Should not be calculated at runtime for each method call as here.
+                        var result = Model.Add(entity)
+                            var result = model.Add(Func<T> adder)
+                                return adder(entity)
+                TESTS:
+                    All 4 option scenarios should have a test.
+                    
+                 */
+                var insertQuery = GetInsertQuery();
 
-                try
+                if (false) 
                 {
-                    var result = await Transient.RetryWithTimeout(() => conn.QueryFirstAsync<T>(query, entity, transaction: trans));
-                    await trans.CommitAsync();
-                    return result;
+                    if (idNotFoundErrorMessage is not null)
+                        throw new Exception($"Identity or single primary key not defined on type: {typeof(T).Name}");
+                    var insertColumns = Model.Columns.Where(x => !x.IsIdentity);
+
+                    var insertColumnClause = string.Join(", ", insertColumns.Select(x => $"[{x.Name}]"));
+                    var valuesClause = string.Join(",", insertColumns.Select(x => $"@{x.PropertyName}"));
+                    var scopeIdWhereClause = $"[{identityColumn.Name}]=@scopeId";
+                    var query = $@"
+                    INSERT INTO [{Model.TableName}]({insertColumnClause})
+                    VALUES ({valuesClause})
+
+                    declare @scopeId {identityColumn.SqlDbType} = SCOPE_IDENTITY();
+
+                    {selectClause} where {scopeIdWhereClause}
+                ";
                 }
-                catch
+                //.Select(x => $"[{model.TryGetColumnNameByProperty(x.Name)}] = @{x.PropertyName}");
+                using (var conn = new SqlConnection(connectionString))
                 {
-                    try { await trans.RollbackAsync(); } catch { }
-                    throw;
+
+                    await conn.OpenAsync();
+                    var trans = await conn.BeginTransactionAsync();
+
+                    try
+                    {
+                        var result = await Transient.RetryWithTimeout(() => conn.QueryFirstAsync<T>(insertQuery, entity, transaction: trans));
+                        await trans.CommitAsync();
+                        return result;
+                    }
+                    catch
+                    {
+                        try { await trans.RollbackAsync(); } catch { }
+                        throw;
+                    }
                 }
             }
+            //);
         }
 
         public async Task<List<T>> Get(IEnumerable<KeyValuePair<string, object>> whereParam)
         {
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
-                var whereClause = whereParam.Select(x => $"[{Model.TryGetColumnNameByProperty(x.Key)}] = @{x.Key}");
-                var query = $"{selectClause} where {string.Join(", ", whereClause)}";
-                var result = await conn.QueryAsync<T>(query, whereParam);
-                return result.ToList();
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    var whereClause = whereParam.Select(x => $"[{Model.TryGetColumnNameByProperty(x.Key)}] = @{x.Key}");
+                    var query = $"{selectClause} where {string.Join(", ", whereClause)}";
+                    var result = await conn.QueryAsync<T>(query, whereParam);
+                    return result.ToList();
+                }
             }
+            //);
         }
 
         public async Task<List<T>> Get(object whereParam)
         {
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
-                var whereClause = whereParam.GetType().GetProperties().Select(x => $"[{Model.TryGetColumnNameByProperty(x.Name)}] = @{x.Name}");
-                var query = $"{selectClause} where {string.Join(" and ", whereClause)}";
-                var result = await conn.QueryAsync<T>(query, whereParam);
-                return result.ToList();
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    var whereClause = whereParam.GetType().GetProperties().Select(x => $"[{Model.TryGetColumnNameByProperty(x.Name)}] = @{x.Name}");
+                    var query = $"{selectClause} where {string.Join(" and ", whereClause)}";
+                    var result = await conn.QueryAsync<T>(query, whereParam);
+                    return result.ToList();
 
+                }
             }
+            //);
         }
 
         public async Task<List<T>> Get(WhereClauseBuilder<T> where)
         {
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
-                var whereParams = where.Build();
-                var query = $"{selectClause} where {whereParams.WhereClause}";
-                var param = new DynamicParameters();
-                whereParams.Parameters.ToList().ForEach(x =>
+                using (var conn = new SqlConnection(connectionString))
                 {
-                    if (x.Value is not null)
-                        param.Add(x.Key, x.Value);
-                    else
-                        param.Add(x.Key, DBNull.Value, DbType.Object);
-                });
-                var result = await conn.QueryAsync<T>(query, param);
-                return result.ToList();
+                    var whereParams = where.Build();
+                    var query = $"{selectClause} where {whereParams.WhereClause}";
+                    var param = new DynamicParameters();
+                    whereParams.Parameters.ToList().ForEach(x =>
+                    {
+                        if (x.Value is not null)
+                            param.Add(x.Key, x.Value);
+                        else
+                            param.Add(x.Key, DBNull.Value, DbType.Object);
+                    });
+                    var result = await conn.QueryAsync<T>(query, param);
+                    return result.ToList();
 
+                }
             }
+            //);
         }
 
         public WhereClauseBuilder<T> Where(Expression<Func<T, bool>> expression)
         {
-            var builder = new WhereClauseBuilder<T>(expression, this);
-            return builder;
+            //return Transient.RetryWithTimeout(() =>
+            {
+                var builder = new WhereClauseBuilder<T>(expression, this);
+                return builder;
+            }
+            //);
         }
 
 
 
         public async Task<int> Count()
         {
-            var query = $"select count(0) from [{Model.TableName}]";
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
-                return await conn.ExecuteScalarAsync<int>(query);
+                var query = $"select count(0) from [{Model.TableName}]";
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    return await conn.ExecuteScalarAsync<int>(query);
+                }
             }
+            //);
         }
 
         public async Task<int> Count(string whereClause, string parameterJson)
         {
-            DynamicParameters? param = GetDynamicParameters(parameterJson);
-            var query = $"select count(0) from [{Model.TableName}] where {whereClause}";
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
-                return await conn.ExecuteScalarAsync<int>(query, param);
+                if (string.IsNullOrEmpty(whereClause)) return await Count();
+                DynamicParameters? param = GetDynamicParameters(parameterJson);
+                var query = $"select count(0) from [{Model.TableName}] where {whereClause}";
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    return await conn.ExecuteScalarAsync<int>(query, param);
+                }
             }
+            //);
         }
 
 
         public async Task<List<T>> GetList(int skip, int take, string? whereClause = null, string? parameterJson = null)
         {
-            var delim = " from ";
-            var idx = selectClause.IndexOf(delim);
-            var preamble = selectClause.Substring(0, idx);
-            var tail = selectClause.Substring(idx);
-            preamble = @$"{preamble}, ROW_NUMBER() OVER (ORDER BY [{identityColumn.Name}]) AS DotOrmRowNumber {tail}";
-            if (whereClause != null)
-                preamble = $"{preamble} where {whereClause}";
+            //return await Transient.RetryWithTimeout(async () =>
+            {
+                if (idNotFoundErrorMessage is not null && defaultSort is null)
+                    throw new Exception($"Identity or key sort not defined on type: {typeof(T).Name}");
+                var delim = " from ";
+                var idx = selectClause.IndexOf(delim);
+                var preamble = selectClause.Substring(0, idx);
+                var tail = selectClause.Substring(idx);
+                preamble = @$"{preamble}, ROW_NUMBER() OVER (ORDER BY {defaultSort}) AS DotOrmRowNumber {tail}";
+                if (whereClause != null)
+                    preamble = $"{preamble} where {whereClause}";
 
-            var query = $@"select * from 
+                var query = $@"select * from 
                 ({preamble})
                 t  WHERE DotOrmRowNumber BETWEEN {skip} AND {skip + take}";
 
-            DynamicParameters? param = GetDynamicParameters(parameterJson);
-          
-            using (var conn = new SqlConnection(connectionString))
-            {
-                var result = await conn.QueryAsync<T>(query, param);
-                return result.ToList();
+                DynamicParameters? param = GetDynamicParameters(parameterJson);
+
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    var result = await conn.QueryAsync<T>(query, param);
+                    return result.ToList();
+                }
+
             }
+            //);
         }
 
         private DynamicParameters? GetDynamicParameters(string? parameterJson)
         {
-            DynamicParameters? param = null;
-            if (parameterJson != null)
+            //return Transient.RetryWithTimeout(() =>
             {
-                param = new();
-                var whereParams =
-                    JsonConvert.DeserializeObject<Dictionary<string, SerializableValue>>(parameterJson);
-                whereParams.ToList().ForEach(x =>
+                DynamicParameters? param = null;
+                if (parameterJson != null)
                 {
-                    if (x.Value is not null)
-                        param.Add(x.Key, x.Value.ObjectValue);
-                    else
-                        param.Add(x.Key, DBNull.Value, DbType.Object);
-                });
+                    param = new();
+                    var whereParams =
+                        JsonConvert.DeserializeObject<Dictionary<string, SerializableValue>>(parameterJson);
+                    whereParams.ToList().ForEach(x =>
+                    {
+                        if (x.Value is not null)
+                            param.Add(x.Key, x.Value.ObjectValue);
+                        else
+                            param.Add(x.Key, DBNull.Value, DbType.Object);
+                    });
+                }
+                return param;
             }
-            return param;
+            //);
         }
 
         public async Task<T> GetById(int id)
 
         {
-            if (string.IsNullOrEmpty(idWhereClause))
-                throw new Exception($"Could not find primary or identity column for type: {typeof(T).Name}");
-
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
-                var query = $"{selectClause} where {idWhereClause}";
-                return await conn.QueryFirstOrDefaultAsync<T>(query, new { id });
+                if (idNotFoundErrorMessage is not null)
+                    throw new Exception($"Identity or single primary key not defined on type: {typeof(T).Name}");
+
+                if (string.IsNullOrEmpty(idWhereClause))
+                    throw new Exception($"Could not find primary or identity column for type: {typeof(T).Name}");
+
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    var query = $"{selectClause} where {idWhereClause}";
+                    return await conn.QueryFirstOrDefaultAsync<T>(query, new { id });
+                }
             }
+            //);
         }
 
 
         public async Task<int> DeleteById(int id)
         {
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
-                var query = $"delete from [{Model.TableName}] where {idWhereClause}";
-                return await conn.ExecuteScalarAsync<int>(query, new { id });
+                if (idNotFoundErrorMessage is not null)
+                    throw new Exception($"Identity or single primary key not defined on type: {typeof(T).Name}");
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    var query = $"delete from [{Model.TableName}] where {idWhereClause}";
+                    return await conn.ExecuteScalarAsync<int>(query, new { id });
+                }
             }
+            //);
         }
 
         public async Task<int> Delete(T entity)
         {
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
-                var query = $"delete from [{Model.TableName}] where {idWhereClause}";
-                var idWhere = idGetter(entity);
-                return await conn.ExecuteScalarAsync<int>(query, (object)idWhere);
+                //TODO: should be able to delete by matching all columns.
+                if (idGetter is null)
+                    throw new Exception($"Identity or primary key not defined on type: {typeof(T).Name}");
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    var query = $"delete from [{Model.TableName}] where {idWhereClause}";
+                    var idWhere = idGetter(entity);
+                    return await conn.ExecuteScalarAsync<int>(query, (object)idWhere);
+                }
             }
+            //);
         }
 
         public async Task<int> Update(object updateParam, object? whereParam = null)
         {
-            if (updateParam is null)
-                return 0;
+            //return await Transient.RetryWithTimeout(async () =>
+            {
+                if (updateParam is null)
+                    return 0;
 
-            var whereClauses = whereParam?.GetType().GetProperties().Select(x => $"[{Model.TryGetColumnNameByProperty(x.Name)}] = @{x.Name}_0");
-            var whereDict = whereParam?.GetType().GetProperties().ToDictionary(x => $"{x.Name}_0", x => x.GetValue(whereParam));
-            // var whereClause = whereDict?.Select(x => $"{x.Key} = {x.Value}");
+                var whereClauses = whereParam?.GetType().GetProperties().Select(x => $"[{Model.TryGetColumnNameByProperty(x.Name)}] = @{x.Name}_0");
+                var whereDict = whereParam?.GetType().GetProperties().ToDictionary(x => $"{x.Name}_0", x => x.GetValue(whereParam));
+                // var whereClause = whereDict?.Select(x => $"{x.Key} = {x.Value}");
 
-            var updateClauses = updateParam.GetType().GetProperties().Select(x => $"[{Model.TryGetColumnNameByProperty(x.Name)}] = @{x.Name}");
-            var updateDict = updateParam.GetType().GetProperties().ToDictionary(x => $"@{x.Name}", x => x.GetValue(updateParam));
+                var updateClauses = updateParam.GetType().GetProperties().Select(x => $"[{Model.TryGetColumnNameByProperty(x.Name)}] = @{x.Name}");
+                var updateDict = updateParam.GetType().GetProperties().ToDictionary(x => $"@{x.Name}", x => x.GetValue(updateParam));
 
-            var query = @$"
+                var query = @$"
                 -- DECLARE @updatedIds TABLE ([{identityColumn.Name}] {identityColumn.SqlDbType});
                 UPDATE [{Model.TableName}] 
                     SET {string.Join(", ", updateClauses)}
                 --OUTPUT inserted.[{identityColumn.Name}] INTO @updatedIds";
 
-            if (whereClauses is not null && whereClauses.Any())
-                query = $@"{query}
+                if (whereClauses is not null && whereClauses.Any())
+                    query = $@"{query}
                 WHERE {string.Join(" and ", whereClauses)}
                 ";
 
-            query = $@"{query} 
+                query = $@"{query} 
                    /* Options: 
                         return updated count:
                             select count(0) as updated from @updatedIds or select @@rowcount
@@ -441,40 +570,45 @@ namespace DotOrmLib
 
 
 
-            var combinedParam = new DynamicParameters();
-            updateDict.ToList().ForEach(x => combinedParam.Add(x.Key, x.Value, Model.GetDbTypeForProperty(x.Key)));
-            whereDict?.ToList().ForEach(x => combinedParam.Add(x.Key, x.Value, Model.GetDbTypeForProperty(x.Key)));
+                var combinedParam = new DynamicParameters();
+                updateDict.ToList().ForEach(x => combinedParam.Add(x.Key, x.Value, Model.GetDbTypeForProperty(x.Key)));
+                whereDict?.ToList().ForEach(x => combinedParam.Add(x.Key, x.Value, Model.GetDbTypeForProperty(x.Key)));
 
 
 
-            using (var conn = new SqlConnection(connectionString))
-            {
-                var result = await conn.QueryFirstAsync<int>(query, combinedParam);
-                return result;
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    var result = await conn.QueryFirstAsync<int>(query, combinedParam);
+                    return result;
+                }
             }
-
+            //);
         }
 
 
         public async Task<int> Update(T entity)
         {
-            if (entity is null)
-                return 0;
-
-            var updateClauses = Model.Columns.Where(x => !x.IsIdentity).Select(x => $"[{Model.TryGetColumnNameByProperty(x.Name)}] = @{x.PropertyName}");
-
-            using (var conn = new SqlConnection(connectionString))
+            //return await Transient.RetryWithTimeout(async () =>
             {
-                var id = ((dynamic)entity).Id;
-                var query = $@"
+                if (entity is null)
+                    return 0;
+
+                var updateClauses = Model.Columns.Where(x => !x.IsIdentity).Select(x => $"[{Model.TryGetColumnNameByProperty(x.Name)}] = @{x.PropertyName}");
+
+                using (var conn = new SqlConnection(connectionString))
+                {
+                    var id = ((dynamic)entity).Id;
+                    var query = $@"
                     UPDATE [{Model.TableName}]
                         SET {string.Join(", ", updateClauses)}
                     WHERE {idWhereClause}
                         
                     SELECT @@ROWCOUNT as UpdateCount
                     ";
-                return await conn.QueryFirstAsync<int>(query, entity);
+                    return await conn.QueryFirstAsync<int>(query, entity);
+                }
             }
+            //);
         }
 
     }
@@ -482,9 +616,12 @@ namespace DotOrmLib
     {
         public static async Task<TKey?> InsertAsync<TEntity, TKey>(this DbConnection connection, TEntity entity, DbTransaction? transaction = null)
         {
-            var query = TypeHelper.GetInsertCommand<TKey>();
-            var result = await connection.ExecuteScalarAsync<TKey>(query, entity, transaction: transaction);
-            return result;
+            return await Transient.RetryWithTimeout(async () =>
+            {
+                var query = TypeHelper.GetInsertCommand<TKey>();
+                var result = await connection.ExecuteScalarAsync<TKey>(query, entity, transaction: transaction);
+                return result;
+            });
         }
     }
     public class TypeHelper
@@ -498,7 +635,26 @@ namespace DotOrmLib
     {
         public static async Task<T> RetryWithTimeout<T>(Func<Task<T>> getter)
         {
-            return await getter();
+            try
+            {
+                return await getter();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{DateTime.Now}] Error: {ex}");
+                return default;
+            }
+        }
+
+        public static T RetryWithTimeout<T>(Func<T> getter)
+        {
+            try
+            { return getter(); }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{DateTime.Now}] Error: {ex}");
+                return default;
+            }
         }
     }
 }

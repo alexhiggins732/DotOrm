@@ -7,6 +7,7 @@ namespace DotOrmLib.Proxy
     {
         using Azure;
         using Azure.Core;
+        using DotOrmLib.GrpcModels.Scalars;
         using DotOrmLib.GrpcServices;
         using DotOrmLib.Proxy.Scc1.Models;
         using Interfaces;
@@ -26,60 +27,60 @@ namespace DotOrmLib.Proxy
             public class DynamicServiceController : ControllerBase<RefactorLog>, IRefactorLogController
             {
                 // Implement the methods from the IRefactorLogController interface here
-            
+
             }
 
             [ServiceContract(Namespace = "http://DotOrmLib.Proxy.Scc1")]
             public interface ITblScoringController1
-                 :IServiceController<TblScoring>
+                 : IServiceController<TblScoring>
             {
                 ValueTask<HealthCheckResponse> HealthCheck();
-                new ValueTask<TblScoring> GetById(IntValue request);
-                new ValueTask<IntValue> DeleteById(IntValue request);
-                new ValueTask<IntValue> Delete(TblScoring request);
-                new ValueTask<IntValue> Update(TblScoring request);
-                new ValueTask<PaginatedResult<TblScoring>> GetList(FilterRequest pageParams);
+                new ValueTask<Result<TblScoring>> GetById(IntValue request);
+                new ValueTask<Result<IntValue>> DeleteById(IntValue request);
+                new ValueTask<Result<IntValue>> Delete(TblScoring request);
+                new ValueTask<Result<IntValue>> Update(TblScoring request);
+                new ValueTask<Result<PaginatedResult<TblScoring>>> GetList(FilterRequest pageParams);
             }
 
             public class TblScoringController :
                 ControllerBase<TblScoring>,
                 ITblScoringController1
-                //IServiceController<TblScoring>
+            //IServiceController<TblScoring>
             {
-     
+
                 public TblScoringController() : base(ConnectionStringProvider.Create("scc1").ConnectionString) { }
 
-                public async ValueTask<IntValue> Delete(TblScoring request)
+                public async ValueTask<Result<IntValue>> Delete(TblScoring request)
                 {
                     var result = await repo.Delete(request);
-                    return result;
+                    return (IntValue)result;
                 }
 
-                public async ValueTask<IntValue> DeleteById(IntValue request)
+                public async ValueTask<Result<IntValue>> DeleteById(IntValue request)
                 {
                     var result = await repo.DeleteById(request.Value);
-                    return result;
+                    return (IntValue)result;
                 }
 
-                public new async ValueTask<TblScoring> GetById(IntValue request)
+                public new async ValueTask<Result<TblScoring>> GetById(IntValue request)
                 {
                     var result = await base.GetById(request);
                     return result;
                 }
 
-       
-                public async ValueTask<PaginatedResult<TblScoring>> GetList(FilterRequest request)
+
+                public async ValueTask<Result<PaginatedResult<TblScoring>>> GetList(FilterRequest request)
                 {
-                    
+
                     var param = JsonConvert.DeserializeObject(request.ParameterJson);
                     var result = await GetList(request.Skip, request.Take, request.WhereClause, request.ParameterJson);
                     return result;
                 }
 
-                public new async ValueTask<IntValue> Update(TblScoring request)
+                public new async ValueTask<Result<IntValue>> Update(TblScoring request)
                 {
-                    var result= await repo.Update(request);
-                    return result;
+                    var result = await repo.Update(request);
+                    return (IntValue)result;
                 }
                 public ValueTask<HealthCheckResponse> HealthCheck()
                 {
@@ -90,7 +91,7 @@ namespace DotOrmLib.Proxy
 
             }
 
-          
+
 
 
 

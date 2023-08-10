@@ -1,4 +1,7 @@
-﻿using System;
+﻿using DotOrmLib.GrpcModels.Scalars;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Mvc;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Serialization;
@@ -40,11 +43,11 @@ namespace DotOrmLib.GrpcServices
     [ServiceContract(Namespace = "http://DotOrmLib.Proxy")]
     public interface IServiceController<T>
     {
-        ValueTask<T> Add(T entity);
-        ValueTask<IntValue> Update(T entity);
-        ValueTask<IntValue> Delete(IntValue id);
-        ValueTask<T> GetById(IntValue idRequest);
-        ValueTask<PaginatedResult<T>> GetList(int skip, int limit);
+        ValueTask<Result<T>> Add(T entity);
+        ValueTask<Result<IntValue>> Update(T entity);
+        ValueTask<Result<IntValue>> Delete(IntValue id);
+        ValueTask<Result<T>> GetById(IntValue idRequest);
+        ValueTask<Result<PaginatedResult<T>>> GetList(FilterRequest filter);
         ValueTask<HealthCheckResponse> HealthCheck();
     }
 
@@ -63,52 +66,95 @@ namespace DotOrmLib.GrpcServices
             this.repo = new DotOrmRepo<T>(connectionString);
         }
 
-        public async ValueTask<T> Add(T entity)
-        {
-            var result = await repo.Add(entity);
-            return result;
-        }
+        public Result<T> Ok(T entity) => new Result<T>(entity);
+        public Result<TResult> Ok<TResult>(TResult entity) => new Result<TResult>(entity);
+        public Result<T> Error(string errorMessage, IEnumerable<string> errorMessages)
+            => new Result<T>(errorMessage, errorMessages.ToList());
+        public Result<TResult> Error<TResult>(string errorMessage, IEnumerable<string> errorMessages)
+            => new Result<TResult>(errorMessage, errorMessages.ToList());
 
-        public async ValueTask<IntValue> Delete(IntValue request)
+        public async ValueTask<Result<T>> Add(T entity)
         {
-            var result = await repo.DeleteById(request.Value);
-            return new IntValue { Value = result };
-        }
-
-        public async ValueTask<T> GetById(IntValue request)
-        {
-            var result= await repo.GetById(request.Value);
-            return result;
-        }
-
-        public async ValueTask<PaginatedResult<T>> GetList(int skip, int take)
-        {
-            var count = await repo.Count();
-            var hasMore = skip + take < count;
-            var items = await repo.GetList(skip, take);
-            var result = new PaginatedResult<T>
+            try
             {
-                Count = count,
-                HasMore = hasMore,
-                Items = items
-            };
-            return result;
+                var result = await repo.Add(entity);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                return Error(ex.Message, new[] { ex.ToString() });
+            }
         }
 
-        public async ValueTask<PaginatedResult<T>> GetList(int skip, int take,
+        public async ValueTask<Result<IntValue>> Delete(IntValue request)
+        {
+            try
+            {
+                var result = await repo.DeleteById(request.Value);
+                return new IntValue { Value = result };
+            }
+            catch (Exception ex)
+            {
+                return Error<IntValue>(ex.Message, new[] { ex.ToString() });
+            }
+        }
+
+        public async ValueTask<Result<T>> GetById(IntValue request)
+        {
+            try
+            {
+                var result = await repo.GetById(request.Value);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                return Error(ex.Message, new[] { ex.ToString() });
+            }
+        }
+
+        public async ValueTask<Result<PaginatedResult<T>>> GetList(FilterRequest filter)
+        {
+            try
+            {
+                var count = await repo.Count(filter.WhereClause, filter.ParameterJson);
+                var hasMore = filter.Skip + filter.Take < count;
+                var items = await repo.GetList(filter.Skip, filter.Take, filter.WhereClause, filter.ParameterJson);
+                var result = new PaginatedResult<T>
+                {
+                    Count = count,
+                    HasMore = hasMore,
+                    Items = items
+                };
+                return result;
+            }
+            catch (Exception ex)
+            {
+                return Error<PaginatedResult<T>>(ex.Message, new[] { ex.ToString() });
+            }
+
+        }
+
+        public async ValueTask<Result<PaginatedResult<T>>> GetList(int skip, int take,
             string whereClause,
             string parameterJson)
         {
-            var count = await repo.Count(whereClause, parameterJson);
-            var hasMore = skip + take < count;
-            var items = await repo.GetList(skip, take, whereClause, parameterJson);
-            var result = new PaginatedResult<T>
+            try
             {
-                Count = count,
-                HasMore = hasMore,
-                Items = items
-            };
-            return result;
+                var count = await repo.Count(whereClause, parameterJson);
+                var hasMore = skip + take < count;
+                var items = await repo.GetList(skip, take, whereClause, parameterJson);
+                var result = new PaginatedResult<T>
+                {
+                    Count = count,
+                    HasMore = hasMore,
+                    Items = items
+                };
+                return result;
+            }
+            catch (Exception ex)
+            {
+                return Error<PaginatedResult<T>>(ex.Message, new[] { ex.ToString() });
+            }
         }
 
         public ValueTask<HealthCheckResponse> HealthCheck()
@@ -118,10 +164,17 @@ namespace DotOrmLib.GrpcServices
             return new ValueTask<HealthCheckResponse>(response);
         }
 
-        public async ValueTask<IntValue> Update(T entity)
+        public async ValueTask<Result<IntValue>> Update(T entity)
         {
-            var result = await repo.Update(entity);
-            return new IntValue { Value = result };
+            try
+            {
+                var result = await repo.Update(entity);
+                return new IntValue { Value = result };
+            }
+            catch (Exception ex)
+            {
+                return Error<IntValue>(ex.Message, new[] { ex.ToString() });
+            }
         }
     }
 

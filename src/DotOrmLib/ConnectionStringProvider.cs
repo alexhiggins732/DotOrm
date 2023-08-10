@@ -31,7 +31,7 @@ namespace DotOrmLib
 
         public static string DefaultServer = "localhost";
         public static string DefaultDatabase = "Scc1";
-        public static string DefaultSqlSaCredentials = $"User Id=sa;Password=Pass@word";
+        public static string DefaultSqlSaCredentials = null;//$"User Id=sa;Password=Pass@word";
         public static string DefaulSqlCredentials = "Trusted_Connection=True;";
         public static string ConnectionStringFormat = $"Server={{Server}};Database={{Database}};Persist Security Info=True;TrustServerCertificate=True;{{DefaultSqlCredentials}}";
         private static IConfigurationRoot config;

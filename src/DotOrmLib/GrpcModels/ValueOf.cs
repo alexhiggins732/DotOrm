@@ -105,7 +105,7 @@ namespace DotOrmLib.GrpcModels
     {
 
         [DataContract]
-        public class Ref<T> 
+        public class Ref<T>
             where T : class
         {
             [DataMember(Order = 1)]
@@ -223,6 +223,32 @@ namespace DotOrmLib.GrpcModels
             }
         }
 
+
+
+        [DataContract]
+        public class Result<T>
+        {
+            [DataMember(Order = 1)]
+            public T Value { get; set; }
+
+            [DataMember(Order = 2)]
+            public bool Success { get; set; }
+            [DataMember(Order = 3)]
+            public string ErrorMessage { get; set; }
+            [DataMember(Order = 4)]
+            public List<string> Errors { get; set; }
+
+            public Result() { Success = true; }
+
+            public Result(T value) { Value = value; Success = true; }
+
+            public Result(string error) { ErrorMessage = error; }
+            public Result(string error, List<string> errorMessages) { ErrorMessage = error; Errors = errorMessages; }
+            public Result(List<string> errorMessages) { ErrorMessage = $"One or more erros occurred"; Errors = errorMessages; }
+
+            public static implicit operator Result<T>(T value) => new Result<T>(value);
+        }
+
         [DataContract]
         public class GrpcValue<T>
         {
@@ -234,7 +260,7 @@ namespace DotOrmLib.GrpcModels
             {
                 get
                 {
-                    if(_item is null)
+                    if (_item is null)
                     {
                         var result = JsonConvert.DeserializeObject<SerializableValue<T>>(ObjectData);
                         if (result is null)

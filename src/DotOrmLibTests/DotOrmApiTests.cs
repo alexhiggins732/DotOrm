@@ -15,6 +15,11 @@ using Newtonsoft.Json.Bson;
 using ProtoBuf.Grpc.Server;
 using ProtoBuf.Grpc.Client;
 using DotOrmLib.GrpcServices;
+using DotOrmLib;
+using System.Diagnostics;
+using DotOrmLib.Proxy.Scc1.Models;
+using DotOrmLib.GrpcModels.Scalars;
+using System.Linq.Expressions;
 
 namespace DotOrmLibTests
 {
@@ -25,23 +30,25 @@ namespace DotOrmLibTests
 
         public DotOrmApiTests()
         {
-            var args = new string[] { };
-            var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder(args);
+            //var args = new string[] { };
+            //var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder(args);
 
-            // Additional configuration is required to successfully run gRPC on macOS.
-            // For instructions on how to configure Kestrel and gRPC clients on macOS, visit https://go.microsoft.com/fwlink/?linkid=2099682
+            //// Additional configuration is required to successfully run gRPC on macOS.
+            //// For instructions on how to configure Kestrel and gRPC clients on macOS, visit https://go.microsoft.com/fwlink/?linkid=2099682
 
-            // Add services to the container.
-            builder.Services.AddCodeFirstGrpc(x =>
-            {
-                //x.Interceptors.Add()
-            });
-            // builder.Services.AddGrpcService<T>();
-            app = builder.Build();
+            //// Add services to the container.
+            //builder.Services.AddCodeFirstGrpc(x =>
+            //{
+            //    //x.Interceptors.Add()
+            //});
 
-            AddServices(builder.Services);
+            //// builder.Services.AddGrpcService<T>();
+            //app = builder.Build();
+            //app.Urls.Add("https://localhost:57057");
+            //app.Urls.Add("http://localhost:57058");
+            ////AddServices(builder.Services);
 
-            Task.Run(() => app.RunAsync());
+            //Task.Run(() => app.RunAsync());
         }
 
 
@@ -58,156 +65,130 @@ namespace DotOrmLibTests
         [TestMethod]
         public async Task TestIActionController()
         {
-            await runApp();
-            using var channel = GrpcChannel.ForAddress("https://localhost:57057/");
+            //await runApp();
+            using var channel = GrpcChannel.ForAddress("https://localhost:57057");
 
             var client = channel.CreateGrpcService<IActionsController>();
 
             var hc = await client.HealthCheck();
-            var l = await client.GetList(0, 10);
-            Assert.IsNotNull(l);
-            Assert.IsNotNull(l.Items);
-            Assert.IsTrue(l.Items.Any());
+            Assert.IsNotNull(hc);
+
+            var l = await client.GetList(new() { Skip = 0, Take = 50 });
+            Assert.IsNotNull(l, "Result was null");
+            Assert.IsNotNull(l.Value, "Result Value was null");
+            Assert.IsNotNull(l.Value.Items, "Result Items was null");
+            Assert.IsTrue(l.Value.Items.Any(), "Result Items was empty");
         }
 
-        private void AddServices(IServiceCollection services)
+        [TestMethod]
+        public async Task TestAddGetDeleteWithoutKeyOrId()
         {
-            var ns = typeof(IActionsController);
-            var contracts = GetServiceContractsInNamespace(ns.Assembly, ns.Namespace).ToList();
+            using var channel = GrpcChannel.ForAddress("https://localhost:57057");
 
-            foreach (var contract in contracts)
-            {
-                Type serviceType = buildServiceContoller(contract);
+            var client = channel.CreateGrpcService<IAddressSuffixController>();
+            var StreetSuffix = "SPACEX";
+            var CommonSuffix = "SPACEX";
+            var StandardSuffix = "SPCX";
 
-                MapService(serviceType);
-            }
-        }
+           var rpcResult= await client.Add(new AddressSuffix { StreetSuffix=StreetSuffix, CommonSuffix=CommonSuffix, StandardSuffix=StandardSuffix });
 
-        public void MapService(Type serviceControllerType)
-        {
-            // call mapservice<t> for service controller type.
-            var mapServiceMethod = typeof(DotOrmApiTests).GetMethod("MapGrpcService", BindingFlags.Public | BindingFlags.Instance)
-                .MakeGenericMethod(serviceControllerType);
+            Assert.IsNotNull(rpcResult);
+            Assert.IsNotNull(rpcResult);
+            Assert.IsNotNull(rpcResult.Value);
+            Assert.AreEqual(StreetSuffix, rpcResult.Value.StreetSuffix);
+            Assert.AreEqual(StreetSuffix, rpcResult.Value.CommonSuffix);
+            Assert.AreEqual(StreetSuffix, rpcResult.Value.StandardSuffix);
 
-            mapServiceMethod.Invoke(this, new object[] { });
-        }
-        public void MapGrpcService<T>()
-            where T : class
-        {
-            app.MapGrpcService<T>();
-        }
+            var repo = new DotOrmRepo<AddressSuffix>(ConnectionStringProvider.Create().ConnectionString);
+            var where = repo.Where(x => x.StreetSuffix == StreetSuffix && x.CommonSuffix == CommonSuffix && x.StandardSuffix == StandardSuffix);
+            var filter = where.BuildFilter();
+            var rpcResults = (await client.GetList(filter));
 
-        private static Type GetServiceContract(Type entityType)
-        {
-            var assemblyName = new AssemblyName("DynamicAssembly");
-            var assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
-            var moduleBuilder = assemblyBuilder.DefineDynamicModule("DynamicModule");
-            var contractBuilder = moduleBuilder.DefineType(entityType.Name, TypeAttributes.Public);
+            Assert.IsNotNull(rpcResults);
+            Assert.IsTrue(rpcResults.Success);
+            Assert.IsNotNull(rpcResults.Value);
+            Assert.IsNotNull(rpcResults.Value.Items);
+            Assert.IsTrue(rpcResults.Value.Items.Any());
+            var rpcFirst= rpcResults.Value.Items.FirstOrDefault();
+            Assert.IsNotNull(rpcFirst);
+            Assert.AreEqual(StreetSuffix, rpcFirst.StreetSuffix);
+            Assert.AreEqual(StreetSuffix, rpcFirst.CommonSuffix);
+            Assert.AreEqual(StreetSuffix, rpcFirst.StandardSuffix);
 
-            // Define the ServiceContract attribute on the new type
-            var serviceContractAttrCtor = typeof(ServiceContractAttribute).GetConstructor(Type.EmptyTypes);
-            var serviceContractBuilder = new CustomAttributeBuilder(serviceContractAttrCtor, new object[0]);
-            contractBuilder.SetCustomAttribute(serviceContractBuilder);
-
-            // Inherit the IServiceController<T> interface
-            var contractBaseType = typeof(IServiceController<>).MakeGenericType(entityType);
-            contractBuilder.AddInterfaceImplementation(contractBaseType);
-
-            // Define the methods on the new type (same as in IServiceController<T>)
-            foreach (var methodInfo in contractBaseType.GetMethods())
-            {
-                var methodBuilder = contractBuilder.DefineMethod(
-                    methodInfo.Name,
-                    MethodAttributes.Public | MethodAttributes.Virtual,
-                    methodInfo.ReturnType,
-                    methodInfo.GetParameters().Select(p => p.ParameterType).ToArray());
-
-                // Emit IL implementation for the methods (You can leave this empty if you just need the definition)
-                //var il = methodBuilder.GetILGenerator();
-                //il.ThrowException(typeof(NotImplementedException));
-            }
-
-            var serviceContractType = contractBuilder.CreateType();
-            return serviceContractType;
+            client.Delete(rpcFirst);
 
         }
 
-        public Type buildServiceContoller(Type serviceContractType)
+        Type GetServiceEntityType(Type serviceContractType)
         {
-            AssemblyName assemblyName = new AssemblyName("DynamicAssembly");
-            AssemblyBuilder assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
 
-            Type baseInterface = serviceContractType.GetInterfaces().First(t => t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IServiceController<>));
+            Type baseInterface = serviceContractType
+                .GetInterfaces()
+                .First(t => t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IServiceController<>));
             if (baseInterface is null)
                 throw new Exception("Contract does not implement: IServiceController<>");
             // Get the generic type argument used in IServiceController<T>
             Type entityType = baseInterface.GetGenericArguments().First();
-            //var baseControllerType=typeof(ControllerBase<>.)
-            // Generate a dynamic module in the assembly
-            ModuleBuilder moduleBuilder = assemblyBuilder.DefineDynamicModule("DynamicModule");
-
-            // Generate a dynamic type that inherits ControllerBase<T> and implements the service contract interface
-            TypeBuilder typeBuilder = moduleBuilder.DefineType(
-                "DynamicServiceController" + serviceContractType.Name,
-                TypeAttributes.Public | TypeAttributes.Class | TypeAttributes.AutoClass | TypeAttributes.AnsiClass | TypeAttributes.BeforeFieldInit,
-                typeof(ControllerBase<>).MakeGenericType(entityType));
-
-
-
-
-            var contractBuilder = moduleBuilder.DefineType(serviceContractType.Name, TypeAttributes.Public |
-                            TypeAttributes.Interface |
-                            TypeAttributes.Abstract |
-                            TypeAttributes.AutoClass |
-                            TypeAttributes.AnsiClass |
-                            TypeAttributes.BeforeFieldInit |
-                            TypeAttributes.AutoLayout
-                            , null);
-
-            // Define the ServiceContract attribute on the new type
-            var serviceContractAttrCtor = typeof(ServiceContractAttribute).GetConstructor(Type.EmptyTypes);
-            var serviceContractBuilder = new CustomAttributeBuilder(serviceContractAttrCtor, new object[0]);
-            contractBuilder.SetCustomAttribute(serviceContractBuilder);
-
-            // Inherit the IServiceController<T> interface
-            var contractBaseType = typeof(IServiceController<>).MakeGenericType(entityType);
-            contractBuilder.AddInterfaceImplementation(contractBaseType);
-
-            // Define the methods on the new type (same as in IServiceController<T>)
-            foreach (var methodInfo in contractBaseType.GetMethods())
+            return entityType;
+        }
+        public async Task TestChannel<TService, TEntity>(GrpcChannel channel)
+            where TService : class, IServiceController<TEntity>
+            where TEntity : class
+        {
+            Console.WriteLine($"Testing {typeof(TEntity)} channel.");
+            var sw = Stopwatch.StartNew();
+            try
             {
-                var methodBuilder = contractBuilder.DefineMethod(
-                    methodInfo.Name,
-                    MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.Abstract,
-                    methodInfo.ReturnType,
-                    methodInfo.GetParameters().Select(p => p.ParameterType).ToArray());
+                var client = channel.CreateGrpcService<TService>();
+                var hc = await client.HealthCheck();
+                Assert.IsNotNull(hc);
 
-                // Emit IL implementation for the methods (You can leave this empty if you just need the definition)
-                //var il = methodBuilder.GetILGenerator();
-                //il.ThrowException(typeof(NotImplementedException));
+                var l = await client.GetList(new() { Skip = 0, Take = 50 });
+                if (l.Errors is not null)
+                {
+                    Assert.IsNull(l.Errors, $"{l.ErrorMessage}: {string.Join("\n\n", l.Errors)}");
+                }
+                Assert.IsTrue(l.Success, "Result Success was false");
+                Assert.IsNotNull(l.Value, "Result Value was null");
+              
+                //Assert.IsNotNull(l.Value.Items, "Result Items was null");
+                //Assert.IsTrue(l.Value.Items.Any(), "Result Items was empty");
+                Console.WriteLine($"Testing {typeof(TEntity)} took {sw.Elapsed}.");
+            }
+            catch (Exception ex)
+            {
+
+                Console.WriteLine($"Failed {typeof(TEntity)} in {sw.Elapsed} - {ex}.");
             }
 
-            var serviceContract = contractBuilder.CreateType();
-            typeBuilder.AddInterfaceImplementation(serviceContract);
-            //typeBuilder.AddInterfaceImplementation(serviceContractType);
-            // Create the type
-            Type dynamicType = typeBuilder.CreateType();
 
-            return dynamicType;
         }
-        public static IEnumerable<Type> GetServiceContractsInNamespace(Assembly asm, string targetNamespace)
+        [TestMethod]
+        public async Task TestAllControllers()
         {
+            var t = typeof(IActionsController);
+            var services = ServiceBuilder.GetServiceContractsInNamespace(t.Assembly, t.Namespace).ToList();
+            var req = new FilterRequest { Skip = 0, Take = 50 };
+            foreach (var service in services)
+            {
+                using var channel = GrpcChannel.ForAddress("https://localhost:57057");
+                var m = typeof(DotOrmApiTests).GetMethod("TestChannel");
+                var entityType = GetServiceEntityType(service);
 
-            var serviceContractTypes = asm.GetExportedTypes()
-                .Where(type =>
-                    type.Namespace == targetNamespace &&
-                    type.GetCustomAttributes(typeof(ServiceContractAttribute), true).Any());
+                var gm = m.MakeGenericMethod(service, entityType);
+                await ((Task)gm.Invoke(this, new object[] { channel }));
 
-            return serviceContractTypes;
+            }
+
+            //await runApp();
+
         }
+
+
+
         public void Dispose()
         {
-            app.StopAsync().Wait();
+            //app.StopAsync().Wait();
         }
     }
 }
