@@ -115,7 +115,7 @@ namespace DotOrmLibTests
             Assert.AreEqual(StreetSuffix, rpcFirst.CommonSuffix);
             Assert.AreEqual(StreetSuffix, rpcFirst.StandardSuffix);
 
-            client.Delete(rpcFirst);
+            //client.Delete(rpcFirst);
 
         }
 

@@ -11,6 +11,8 @@
 		<ProjectReference Condition="'$(ExampleRefs)'=='local'" Include="..\..\..\src\protobuf-net.Grpc\protobuf-net.Grpc.csproj" />
 
 		<ProjectReference Include="..\DotOrmLib\DotOrmLib.csproj" />
+
+		<ProjectReference Include="..\DotRpc\DotRpc.csproj" />
 		<PackageReference Condition="'$(ExampleRefs)'=='nuget'" Include="protobuf-net.Grpc" />
 	</ItemGroup>
 </Project>

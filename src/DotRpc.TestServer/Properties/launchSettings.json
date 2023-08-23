@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "DotRpc.TestServer": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "https://localhost:63601/swagger",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:63601;http://localhost:63602"
+    }
+  }
+}

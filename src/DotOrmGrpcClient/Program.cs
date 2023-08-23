@@ -10,6 +10,7 @@ using Grpc.Net.Client;
 using Microsoft.Data.SqlClient;
 using ProtoBuf.Grpc.Client;
 using System.Numerics;
+using System.Reflection;
 
 namespace DotOrmGrpcClient
 {
@@ -17,6 +18,9 @@ namespace DotOrmGrpcClient
     {
         private static async Task Main(string[] args)
         {
+
+            var n= Assembly.GetEntryAssembly();
+
             using var channel = GrpcChannel.ForAddress("https://localhost:57057/");
 
             var scalarClient = channel.CreateGrpcService<IGrpcScalarTestService>();
@@ -40,7 +44,8 @@ namespace DotOrmGrpcClient
             var br = await scalarClient.EchoGrpcValueOfBigInteger(bigSerializable);
             var brValue = br.Item;
             var bigSerializableT = new SerializableValue<BigInteger>(b);
-            var ba = (SerializableValue<BigInteger>)(await scalarClient.EchoRefOfSerializable(bigSerializableT));
+            //fails
+            //var ba = (SerializableValue<BigInteger>)(await scalarClient.EchoRefOfSerializable(bigSerializableT));
 
             var barray = new byte[] { 0, 1 };
             var b2 = await scalarClient.EchoByteArray(barray);

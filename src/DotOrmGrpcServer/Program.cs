@@ -24,7 +24,10 @@ namespace DotOrmGrpcServer
 
             // Add services to the container.
             builder.Services.AddCodeFirstGrpc();
-
+            var services = builder.Services;
+            services.AddHttpContextAccessor();
+            services.AddEndpointsApiExplorer();
+          
             var app = builder.Build();
             app.AddDynamicGrpcServiceFromTypeAssembly(typeof(IActionsController));
 
