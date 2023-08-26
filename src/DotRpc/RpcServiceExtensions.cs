@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.Mvc;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text.Json;
-
+using System.ServiceModel;
+using Swashbuckle.AspNetCore;
+using Swashbuckle.AspNetCore.SwaggerGen;
 namespace DotRpc
 {
     using static Utils;
@@ -25,21 +27,23 @@ namespace DotRpc
                 Assembly assembly,
                 Action<IServiceCollection>? configure = null)
             {
-                var contracts = assembly.GetTypes().Where(x => IsRpcContact(x)).ToList();
+                var contracts = assembly.GetTypes().Where(x => IsRpcContract(x)).ToList();
                 Dictionary<Type, Dictionary<MethodInfo, RpcEndpointConfiguration>> rpcServices = new();
                 var clientServiceType = typeof(IRpcClient<>);
                 var clientImplementationType = typeof(RpcClient<>);
+                var sp = services.BuildServiceProvider();
+                var TypeFactory = sp.GetService<IRpcTypeFactory>();
                 contracts.ForEach(contractType =>
                 {
 
-                    var att = contractType.GetCustomAttribute<RpcServiceAttribute>();
+                    var att = contractType.GetRpcContract();// contractType.GetCustomAttribute<RpcServiceAttribute>();
                     var area = $"/{att.Name}/";
                     Dictionary<MethodInfo, RpcEndpointConfiguration> serviceCalls = new();
                     foreach (var method in contractType.GetMethods())
                     {
 
                         var requestType = TypeFactory.GetMethodProxyType(method);
-                        var path = NameService.GetApiPathName(method);
+                        var path = method.GetApiPathName();
                         var routeEndpoint = $"{area}{path}";
 
                         //app.MapPost(routeEndpoint,
@@ -75,7 +79,7 @@ namespace DotRpc
                 services.AddSingleton<IRpcConfigurationProvider>(sp => new RpcConfigurationProvider(rpcServices));
 
 
-                configure?.Invoke(null);
+
                 configure?.Invoke(services);
                 return services;
             }
@@ -135,6 +139,8 @@ namespace DotRpc
         {
             configure?.Invoke(services);
 
+            services.AddSingleton<IRpcTypeFactory, RpcTypeFactory>();
+            services.AddSingleton<IRpxProxyGenerator, RpcProxyGenerator>();
             services.AddSingleton<IResponseFormatter, JsonResponseFormatter>();
             services.AddSingleton<IRpcMapper, RpcMapper>();
             services.AddSingleton<IArgumentMapper, ArgumentMapper>();
@@ -142,6 +148,18 @@ namespace DotRpc
             services.AddSingleton<IMethodInvoker, MethodInvoker>();
             services.AddSingleton<IRpcHandler, RpcHandler>();
             services.AddSingleton<IDataContractRequestFormatter, DataContractRequestFormatter>();
+
+            //services.AddApiVersioning(options =>
+            //{
+            //    options.DefaultApiVersion = new ApiVersion(1, 0); // Set your default API version
+            //    options.ReportApiVersions = true;
+            //    options.AssumeDefaultVersionWhenUnspecified = true;
+            //});
+
+            //services.AddVersionedApiExplorer(options =>
+            //{
+            //    //options.GroupNameFormat = "'v'VVV"; // Use a version prefix for group names
+            //});
             return services;
         }
         public static WebApplication AddDotRpcFromAssembly(
@@ -149,15 +167,20 @@ namespace DotRpc
             Assembly assembly,
             Action<WebApplication>? configure = null)
         {
-            var contracts = assembly.GetTypes().Where(x => IsRpcContact(x)).ToList();
+            var contracts = assembly.GetTypes().Where(x => IsRpcContract(x)).ToList();
+
             contracts.ForEach(serviceType =>
             {
-                var att = serviceType.GetCustomAttribute<RpcServiceAttribute>();
+                var att = serviceType.GetRpcContract();
+
+                
                 var area = $"/{att.Name}/";
+                var sp = app.Services;
+                var TypeFactory = sp.GetService<IRpcTypeFactory>();
                 foreach (var method in serviceType.GetMethods())
                 {
                     var requestType = TypeFactory.GetMethodProxyType(method);
-                    var path = NameService.GetApiPathName(method);
+                    var path = method.GetApiPathName();
                     var routeEndpoint = $"{area}{path}";
                     app.MapPost(routeEndpoint,
 
@@ -173,12 +196,82 @@ namespace DotRpc
                                 return HandleRequest(serviceProvider, handler, formatter, requestData, serviceType, requestType, method);
                             }
                         )
-                    .Accepts(requestType, "application/json")
-                    .Produces(200, method.ReturnType);// TypeFactory.GetMethodProxyType(method));
+                        .WithTags(att.Name)
+                        .Accepts(requestType, "application/json")
+                        .Produces(200, GetReturnType(method.ReturnType))
+                    //.WithOpenApi()
+                    ;// TypeFactory.GetMethodProxyType(method));
                 }
+
+
+
             });
-            configure?.Invoke(null);
+            configure?.Invoke(app);
             return app;
+        }
+
+        private static Type? GetReturnType(Type returnType)
+        {
+            if (!returnType.IsGenericType)
+            {
+                return returnType;
+            }
+
+            // Handle Nullable<T>
+            if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Nullable<>))
+            {
+                return GetReturnType(returnType.GetGenericArguments()[0]);
+            }
+
+            // Handle Task<T>
+            if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
+            {
+                return GetReturnType(returnType.GetGenericArguments()[0]);
+            }
+
+            // Handle ValueTask<T>
+            if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ValueTask<>))
+            {
+                return GetReturnType(returnType.GetGenericArguments()[0]);
+            }
+
+            // Handle ActionResult<T>
+            if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ActionResult<>))
+            {
+                return GetReturnType(returnType.GetGenericArguments()[0]);
+            }
+
+
+            // Handle other cases
+            var genericArguments = returnType.GetGenericArguments();
+            for (int i = 0; i < genericArguments.Length; i++)
+            {
+                genericArguments[i] = GetReturnType(genericArguments[i]);
+            }
+
+            return returnType.GetGenericTypeDefinition().MakeGenericType(genericArguments);
+
+            return returnType;
+        }
+
+        public static RpcServiceAttribute GetRpcContract(this Type serviceType, bool optional = false)
+        {
+            var result = serviceType.GetCustomAttribute<RpcServiceAttribute>();
+            if (result is null)
+            {
+
+                var serviceContract = serviceType.GetCustomAttribute<ServiceContractAttribute>();
+                if (serviceContract != null)
+                {
+                    result = new RpcServiceAttribute(
+                        serviceContract.Name ?? serviceType.Name,
+                        serviceType.Assembly.ToPropertyName(),
+                        null);
+                }
+                if (result is null && !optional)
+                    throw new Exception($"{serviceType.Name} is not an RpcService");
+            }
+            return result;
         }
 
         private static object HandleRequest(
@@ -190,7 +283,7 @@ namespace DotRpc
             Type requestType,
             MethodInfo serviceMethod)
         {
-  
+
             var contract = formatter.Map(requestType, requestData);
             //var body = accesor.HttpContext.Request.Body.Length;
             var args = contract.ToArray();
@@ -202,10 +295,15 @@ namespace DotRpc
     {
 
 
-        public static bool IsRpcContact(Type x)
+        public static bool IsRpcContract(Type x)
         {
             var att = x.GetCustomAttribute<RpcServiceAttribute>();
             if (att != null)
+            {
+                return true;
+            }
+            var serviceContract = x.GetCustomAttribute<ServiceContractAttribute>();
+            if (serviceContract != null)
             {
                 return true;
             }
