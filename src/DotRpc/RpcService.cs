@@ -17,10 +17,22 @@ namespace DotRpc
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, Inherited = true, AllowMultiple = false)]
     public class RpcServiceAttribute : Attribute
     {
-        public RpcServiceAttribute() { }
-        public Type CallbackContract { get; set; } = null!;
-        public string Name { get; set; } = NameService.ToProperyName(nameof(IRpcHandler));
-        public string Namespace { get; set; } = NameService.ToProperyName(Path.GetFileNameWithoutExtension((Assembly.GetEntryAssembly() ?? typeof(RpcServiceAttribute).Assembly).ManifestModule.Name));
+        public RpcServiceAttribute()
+        {
+            Name = nameof(IRpcHandler).ToPropertyName();
+            Namespace = (Assembly.GetEntryAssembly() ?? typeof(RpcServiceAttribute).Assembly).ToPropertyName();
+
+        }
+
+        public RpcServiceAttribute(string name, string @namespace, Type callBackContract)
+        {
+            Name = name.ToPropertyName();
+            Namespace = @namespace.ToPropertyName();
+            CallbackContract = callBackContract;
+        }
+        public Type? CallbackContract { get; set; } 
+        public string Name { get; set; } 
+        public string Namespace { get; set; }
     }
 
     public class RpcPayload
@@ -139,10 +151,15 @@ namespace DotRpc
     {
         private readonly IArgumentMapper argumentMapper;
 
-        public JsonRequestFormatter(IArgumentMapper argumentMapper)
+        public JsonRequestFormatter(IArgumentMapper argumentMapper, IRpcTypeFactory typeFactory)
         {
+            TypeFactory = typeFactory;
             this.argumentMapper = argumentMapper;
+
         }
+
+        public IRpcTypeFactory TypeFactory { get; }
+
         public MethodArgs Map(RpcPayload request, MethodInfo methodInfo)
         {
             var json = request.Payload is null ? string.Empty : Encoding.UTF8.GetString(request.Payload);
@@ -329,30 +346,33 @@ namespace DotRpc
         public TService Service { get; set; }
 
 
-        public RpcClient(IRpcConfigurationProvider rpcConfiguration)
+        public RpcClient(IRpcConfigurationProvider rpcConfiguration, IRpcTypeFactory typeFactory)
         {
             var gen = new Castle.DynamicProxy.ProxyGenerator();
 
-            IInterceptor interceptor = new RpcClientServiceInterceptor(rpcConfiguration);
+            IInterceptor interceptor = new RpcClientServiceInterceptor(rpcConfiguration, typeFactory);
             this.Service = gen.CreateInterfaceProxyWithoutTarget<TService>(interceptor);
             this.rpcConfiguration = rpcConfiguration;
         }
 
         public class RpcClientServiceInterceptor : IInterceptor
         {
+            public IRpcTypeFactory TypeFactory { get; }
+
             private readonly IRpcConfigurationProvider rpcConfiguration;
 
-            public RpcClientServiceInterceptor(IRpcConfigurationProvider rpcConfiguration)
+            public RpcClientServiceInterceptor(IRpcConfigurationProvider rpcConfiguration, IRpcTypeFactory typeFactory)
             {
+                TypeFactory = typeFactory;
                 this.rpcConfiguration = rpcConfiguration;
             }
             public void Intercept(IInvocation invocation)
             {
-                var value = DotRpc.TypeFactory.GetMethodProxyType(invocation.Method);
+                var value = TypeFactory.GetMethodProxyType(invocation.Method);
 
                 var formatter = new DataContractRequestFormatter();
                 var contract = formatter.Map(value, invocation.Arguments);
-          
+
 
                 var config = rpcConfiguration.GetEndpointConfiguration(invocation.Method.DeclaringType, invocation.Method);
                 var path = config.RouteEndpoint;
