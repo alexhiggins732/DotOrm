@@ -10,7 +10,6 @@ using Newtonsoft.Json;
 
 namespace DotOrmLibTests
 {
-  
 
 
     [TestClass]
