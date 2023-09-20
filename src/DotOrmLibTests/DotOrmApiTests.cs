@@ -97,7 +97,7 @@ namespace DotOrmLibTests
             Assert.IsNotNull(rpcResult.Value);
             Assert.AreEqual(StreetSuffix, rpcResult.Value.StreetSuffix);
             Assert.AreEqual(StreetSuffix, rpcResult.Value.CommonSuffix);
-            Assert.AreEqual(StreetSuffix, rpcResult.Value.StandardSuffix);
+            Assert.AreEqual(StandardSuffix, rpcResult.Value.StandardSuffix);
 
             var repo = new DotOrmRepo<AddressSuffix>(ConnectionStringProvider.Create().ConnectionString);
             var where = repo.Where(x => x.StreetSuffix == StreetSuffix && x.CommonSuffix == CommonSuffix && x.StandardSuffix == StandardSuffix);
