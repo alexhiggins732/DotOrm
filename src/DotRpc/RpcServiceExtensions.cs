@@ -7,8 +7,19 @@ using System.Text.Json;
 using System.ServiceModel;
 using Swashbuckle.AspNetCore;
 using Swashbuckle.AspNetCore.SwaggerGen;
+using Newtonsoft.Json;
+using Microsoft.AspNetCore.Components.Forms;
+using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi.Any;
+using Microsoft.OpenApi.Extensions;
+using Microsoft.AspNetCore.Mvc.ApiExplorer;
+using System.ComponentModel.Design;
+using DotRpc.RpcClient;
+using System.Reflection.Metadata;
+
 namespace DotRpc
 {
+
     using static Utils;
     namespace RpcClient
     {
@@ -31,6 +42,8 @@ namespace DotRpc
                 Dictionary<Type, Dictionary<MethodInfo, RpcEndpointConfiguration>> rpcServices = new();
                 var clientServiceType = typeof(IRpcClient<>);
                 var clientImplementationType = typeof(RpcClient<>);
+
+                services.AddSingleton(clientServiceType, clientImplementationType);
                 var sp = services.BuildServiceProvider();
                 var TypeFactory = sp.GetService<IRpcTypeFactory>();
                 contracts.ForEach(contractType =>
@@ -39,7 +52,8 @@ namespace DotRpc
                     var att = contractType.GetRpcContract();// contractType.GetCustomAttribute<RpcServiceAttribute>();
                     var area = $"/{att.Name}/";
                     Dictionary<MethodInfo, RpcEndpointConfiguration> serviceCalls = new();
-                    foreach (var method in contractType.GetMethods())
+                    var contractMethods = GetAllMethodsFromInterface(contractType);
+                    foreach (var method in contractMethods)
                     {
 
                         var requestType = TypeFactory.GetMethodProxyType(method);
@@ -71,9 +85,8 @@ namespace DotRpc
 
                     var serviceType = clientServiceType.MakeGenericType(contractType);
                     var implementationType = clientImplementationType.MakeGenericType(contractType);
-                    //DotRpc.RpcClient`1[DotRpc.TestCommon.IRpcTestService]
-                    //DotRpc.RpcClient`1[[DotRpc.TestCommon.IRpcTestService]
-                    services.AddTransient(serviceType, implementationType);
+                    //services.AddSingleton(serviceType, implementationType);
+                    // services.AddScoped(serviceType, sp=> GetImplemenation(sp, contractType) );
                 });
 
                 services.AddSingleton<IRpcConfigurationProvider>(sp => new RpcConfigurationProvider(rpcServices));
@@ -83,7 +96,40 @@ namespace DotRpc
                 configure?.Invoke(services);
                 return services;
             }
+
+            private static object GetImplemenation(IServiceProvider sp, Type implementationType)
+            {
+                if (!implementationType.ContainsGenericParameters)
+                {
+                    var t = typeof(RpcClient<>).MakeGenericType(implementationType);
+                    var instance = Activator.CreateInstance(t, new object[] { sp });
+                    if (instance == null)
+                        throw new Exception("Error creating service with default servicep provider constructor");
+                    return instance;
+                }
+                else
+                {
+                    return null;
+                }
+            }
+
+            public static MethodInfo[] GetAllMethodsFromInterface(this Type interfaceType)
+            {
+                var methods = interfaceType.GetMethods();
+
+                var implementedInterfaces = interfaceType.GetInterfaces();
+
+                foreach (var implementedInterface in implementedInterfaces)
+                {
+                    var interfaceMethods = GetAllMethodsFromInterface(implementedInterface);
+                    methods = methods.Concat(interfaceMethods).ToArray();
+                }
+
+                return methods;
+            }
+
         }
+
 
         public class RpcConfigurationProvider : IRpcConfigurationProvider
         {
@@ -102,6 +148,38 @@ namespace DotRpc
                     if (contract.ContainsKey(serviceMethod))
                     {
                         return contract[serviceMethod];
+                    }
+                    else if (serviceMethod.IsGenericMethod)
+                    {
+                        foreach (var kvp in contract)
+                        {
+                            if (kvp.Key.Name == serviceMethod.Name)
+                                return kvp.Value;
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var service in rpcServices)
+                    {
+                        if (serviceType.IsAssignableFrom(service.Key))
+                        {
+                            //todo cache:
+                            rpcServices.Add(serviceType, service.Value);
+                            var contract = service.Value;
+                            if (contract.ContainsKey(serviceMethod))
+                            {
+                                return contract[serviceMethod];
+                            }
+                            else //if (serviceMethod.IsGenericMethod)
+                            {
+                                foreach (var kvp in contract)
+                                {
+                                    if (kvp.Key.Name == serviceMethod.Name)
+                                        return kvp.Value;
+                                }
+                            }
+                        }
                     }
                 }
                 return null;
@@ -138,9 +216,9 @@ namespace DotRpc
             Action<IServiceCollection>? configure = null)
         {
             configure?.Invoke(services);
-
+            services.AddLogging();
             services.AddSingleton<IRpcTypeFactory, RpcTypeFactory>();
-            services.AddSingleton<IRpxProxyGenerator, RpcProxyGenerator>();
+            services.AddSingleton<IRpcProxyGenerator, RpcProxyGenerator>();
             services.AddSingleton<IResponseFormatter, JsonResponseFormatter>();
             services.AddSingleton<IRpcMapper, RpcMapper>();
             services.AddSingleton<IArgumentMapper, ArgumentMapper>();
@@ -160,29 +238,78 @@ namespace DotRpc
             //{
             //    //options.GroupNameFormat = "'v'VVV"; // Use a version prefix for group names
             //});
+
             return services;
         }
-        public static WebApplication AddDotRpcFromAssembly(
-            this WebApplication app,
-            Assembly assembly,
-            Action<WebApplication>? configure = null)
+
+        public static IServiceCollection AddDotRpcSwagger(
+           this IServiceCollection services,
+           Action<IServiceCollection>? configure = null)
+        {
+            services.AddHttpContextAccessor();
+            services.AddEndpointsApiExplorer();
+            services.AddSwaggerGen(c =>
+            {
+                c.SchemaGeneratorOptions.SchemaIdSelector = x => x.DotRpcSwaggerSchemaIdGenerator();
+
+            });
+            configure?.Invoke(services);
+            return services;
+        }
+        public static WebApplication UseDotRpcSwagger(
+           this WebApplication app,
+           Action<WebApplication>? configure = null)
+        {
+            app.UseSwagger();
+            app.UseSwaggerUI();
+            configure?.Invoke(app);
+            return app;
+        }
+        
+        public static WebApplication UseDotRpcFromAssembly(
+        this WebApplication app,
+        Assembly assembly,
+        Action<WebApplication>? configure = null)
         {
             var contracts = assembly.GetTypes().Where(x => IsRpcContract(x)).ToList();
-
+            var sp = app.Services;
+            var TypeFactory = sp.GetService<IRpcTypeFactory>();
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             contracts.ForEach(serviceType =>
             {
                 var att = serviceType.GetRpcContract();
 
-                
+
                 var area = $"/{att.Name}/";
-                var sp = app.Services;
-                var TypeFactory = sp.GetService<IRpcTypeFactory>();
-                foreach (var method in serviceType.GetMethods())
+
+                foreach (var method in serviceType.GetAllMethodsFromInterface())
                 {
                     var requestType = TypeFactory.GetMethodProxyType(method);
                     var path = method.GetApiPathName();
                     var routeEndpoint = $"{area}{path}";
-                    app.MapPost(routeEndpoint,
+                    var implementedRequest = requestType;
+                    if (requestType.IsGenericType)
+                    {
+                        var args = requestType.GetGenericArguments();
+                        if (!serviceType.IsGenericType && !method.IsGenericMethod)
+                            implementedRequest = typeof(DotRpcRequest<>).MakeGenericType(new Type[] { requestType });
+                        else
+                        {
+                            var typeArgs = new List<Type>();
+                            if (method.IsGenericMethod)
+                                typeArgs.AddRange(method.GetGenericArguments().Select(x => typeof(string)).ToArray());
+                            if (serviceType.IsGenericType)
+                                typeArgs.AddRange(serviceType.GetGenericArguments().Select(x => typeof(string)).ToArray());
+                            var instance = requestType.MakeGenericType(typeArgs.ToArray());
+                            var implementementedRequest = RpcProxyGenerator.EmitExampleProxy(loggerFactory, requestType);
+                            if (!serviceType.IsGenericType)
+                                implementedRequest = typeof(DotRpcRequest<>).MakeGenericType(new Type[] { implementementedRequest });
+                            else
+                                implementedRequest = typeof(DotRpcGenericRequest<>).MakeGenericType(new Type[] { implementementedRequest });
+                        }
+
+                    }
+                    var builder = app.MapPost(routeEndpoint,
 
                         //(IRpcHandler handler, RpcPayload request) =>
                         //    handler.HandleRequest(method, request)
@@ -190,17 +317,22 @@ namespace DotRpc
                             IServiceProvider serviceProvider,
                             IRpcHandler handler,
 
-                        IDataContractRequestFormatter formatter,
-                        [FromBody] JsonElement requestData) =>
+                            IDataContractRequestFormatter formatter,
+                            [FromBody] JsonElement requestData) =>
                             {
                                 return HandleRequest(serviceProvider, handler, formatter, requestData, serviceType, requestType, method);
                             }
                         )
+
+                        //.ExcludeFromDescription()
                         .WithTags(att.Name)
-                        .Accepts(requestType, "application/json")
-                        .Produces(200, GetReturnType(method.ReturnType))
-                    //.WithOpenApi()
-                    ;// TypeFactory.GetMethodProxyType(method));
+                        .Accepts(implementedRequest, "application/json")
+                        .Produces(200, GetReturnType(method.ReturnType));
+                    if (method.IsGenericMethod)
+                    {
+                        //todo: provide custom example
+                    }
+
                 }
 
 
@@ -266,11 +398,28 @@ namespace DotRpc
                     result = new RpcServiceAttribute(
                         serviceContract.Name ?? serviceType.Name,
                         serviceType.Assembly.ToPropertyName(),
-                        null);
+                        serviceType);
                 }
-                if (result is null && !optional)
-                    throw new Exception($"{serviceType.Name} is not an RpcService");
+
             }
+            if (result is not null)
+            {
+                result.CallbackContract = serviceType;
+                if (result.Name == nameof(IRpcHandler).ToPropertyName())
+                {
+                    result.Name = (serviceType.Name).ToPropertyName();
+                }
+                if (result.Name.Length > 1 && result.Name.StartsWith("I") && char.IsUpper(result.Name[1]))
+                {
+                    result.Name = result.Name.Substring(1);
+                }
+            }
+            else if (!optional)
+            {
+                throw new Exception($"{serviceType.Name} is not an RpcService");
+            }
+
+
             return result;
         }
 
@@ -283,12 +432,116 @@ namespace DotRpc
             Type requestType,
             MethodInfo serviceMethod)
         {
+            if (serviceMethod.IsGenericMethod || requestType.IsGenericType || serviceType.IsGenericType)
+                return HandleGenericRequest(serviceProvider, handler, formatter, requestData, serviceType, requestType, serviceMethod);
+            try
+            {
+                //var contractElement= requestData.EnumerateObject().Last().Value; 
+                var contract = JsonConvert.DeserializeObject(requestData.GetRawText(), requestType);
+                //var body = accesor.HttpContext.Request.Body.Length;
+                var args = ((IDataContract)contract).ToArray();
+                var result = handler.HandleRequest(serviceType, serviceMethod, args);
+                var resultJson = JsonConvert.SerializeObject(result);
+                return resultJson;
+            }
+            catch (Exception ex)
+            {
+                return new DotRpcError(ex);
+            }
+        }
+        private static object HandleGenericRequest(
+            IServiceProvider serviceProvider,
+            IRpcHandler handler,
+            IDataContractRequestFormatter formatter,
+            JsonElement requestData,
+            Type serviceType,
+            Type requestType,
+            MethodInfo serviceMethod)
+        {
+            try
+            {
+                var request = JsonConvert.DeserializeObject<DotRpcGenericServiceRequest>(requestData.GetRawText());
+                var request1 = requestData.Deserialize<DotRpcGenericServiceRequest>();
+                if (request is null)
+                {
+                    throw new Exception($"Failed to deserialize DotRpcRequest: {requestData.GetRawText()}");
+                }
 
-            var contract = formatter.Map(requestType, requestData);
-            //var body = accesor.HttpContext.Request.Body.Length;
-            var args = contract.ToArray();
-            var result = handler.HandleRequest(serviceType, serviceMethod, args);
-            return result;
+
+                //todo: correctly handle generic/non-generic method and generic/non-generic type.
+                var genericArguments = new List<Type>();
+                if (request.MethodArgumentTypes != null)
+                {
+                    foreach (var genericParameter in request.MethodArgumentTypes)
+                    {
+                        var t = Type.GetType(TypeNameService.GetFullTypeName(genericParameter));
+                        if (t is null)
+                        {
+                            throw new Exception($"Failed to load method argument type: {genericParameter}");
+                        }
+                        genericArguments.Add(t);
+                    }
+                }
+
+
+                var genericTypeArguments = new List<Type>();
+                if (request is DotRpcGenericServiceRequest genericTypeRequest)
+                {
+                    if (genericTypeRequest.TypeArgumentsTypes != null)
+                    {
+                        foreach (var genericParameter in genericTypeRequest.TypeArgumentsTypes)
+                        {
+                            var t = Type.GetType(genericParameter)
+                                ?? serviceType.Assembly.GetType(genericParameter)
+                                ?? serviceMethod.DeclaringType.Assembly.GetType(genericParameter)
+                                ?? requestType.Assembly.GetType(genericParameter);
+                            if (t is null)
+                            {
+                                throw new Exception($"Failed to load method argument type: {genericParameter}");
+                            }
+                            genericTypeArguments.Add(t);
+                        }
+                    }
+                }
+
+                object? service = null!;
+
+                if (serviceType.IsGenericType)
+                    serviceType = serviceType.MakeGenericType(genericTypeArguments.ToArray());
+
+                service = serviceProvider.GetService(serviceType);
+                if (service is null)
+                    throw new Exception($"Failed to resolve service for service type: {serviceType.ToCSharpDeclaration()}");
+
+                var genericMethod = serviceMethod;
+                if (serviceMethod.IsGenericMethod)
+                    genericMethod = serviceMethod.MakeGenericMethod(genericArguments.ToArray());
+
+                var TypeFactory = serviceProvider.GetService<IRpcTypeFactory>();
+
+                var proxyType = TypeFactory.GetMethodProxyType(genericMethod);
+                var genericProxyType = proxyType;
+                if (proxyType.IsGenericType)
+                    genericProxyType = proxyType.MakeGenericType(genericArguments.Concat(genericTypeArguments).ToArray());
+                var proxyInstance = Activator.CreateInstance(genericProxyType);
+                var contract = JsonConvert.DeserializeObject(request.Contract.ToString(), genericProxyType);
+                //var contract = request.Contract.Deserialize(genericProxyType);
+                var dataContract = (IDataContract)contract;
+                var genericArgs = dataContract.ToArray();
+
+                var genericResult = genericMethod.Invoke(service, genericArgs);
+                var genericResultJson = JsonConvert.SerializeObject(genericResult);
+                return genericResultJson;
+            }
+            catch (Exception ex)
+            {
+                return new DotRpcError(ex);
+            }
+
+
+
+
+
         }
     }
     public static class Utils

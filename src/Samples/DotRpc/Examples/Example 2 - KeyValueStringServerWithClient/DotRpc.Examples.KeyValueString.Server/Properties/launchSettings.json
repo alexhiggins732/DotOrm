@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "Example1.SimpleServer": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "swagger/",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:50929;http://localhost:50930"
+    }
+  }
+}

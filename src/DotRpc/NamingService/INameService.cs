@@ -3,7 +3,7 @@
 namespace DotRpc
 {
     [RpcService]
-    public interface INameService
+    public interface INameService: ICSharpDeclarationProvider
     {
         string CleanName(string name);
         string CleanName(Type type);
@@ -20,8 +20,6 @@ namespace DotRpc
         string ToPropertyName(MethodInfo name);
         string ToPropertyName(MethodTypeDescription name);
         string GetParameterName(ParameterInfo x);
-        string ToCSharpDeclaration(Type type, bool includeNamespace = false, bool includeAssemblyName = false);
-
     }
 
 }

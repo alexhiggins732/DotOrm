@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\DotRpc.TestServer\DotRpc.TestServer.csproj" />
     <ProjectReference Include="..\DotRpc\DotRpc.csproj" />
   </ItemGroup>
 

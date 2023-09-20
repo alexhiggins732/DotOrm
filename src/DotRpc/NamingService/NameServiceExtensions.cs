@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections.Concurrent;
+using System.Reflection;
 
 namespace DotRpc
 {
@@ -16,15 +17,26 @@ namespace DotRpc
             return Instance.CleanName(type);
         }
 
+        public static ConcurrentDictionary<MethodTypeDescription, string> RpcMethodNameCache = new();
+
+
+        public static ConcurrentDictionary<TypeDescription, string> RpcTypeNameNameCache = new();
         public static string GenerateRpcMethodName(this MethodTypeDescription method)
         {
-            return Instance.GenerateRpcMethodName(method);
+            return RpcMethodNameCache.GetOrAdd(method, x => Instance.GenerateRpcMethodName(x));
         }
 
-        public static string GenerateSwaggerSchemaId(this Type type)
+        public static string GenerateRpcTypeName(this TypeDescription type)
+            => RpcTypeNameNameCache.GetOrAdd(type, x => Instance.GenerateSwaggerSchemaId(x.Type));
+
+        public static string ToCSharpDeclaration(this Type type, bool includeNamespace = false, bool includeAssemblyName = false)
+            => Instance.ToCSharpDeclaration(type, includeNamespace, includeAssemblyName);
+
+        public static string DotRpcSwaggerSchemaIdGenerator(this Type type)
         {
             return Instance.GenerateSwaggerSchemaId(type);
         }
+
 
         public static string GenerateSwaggerTag(this Type type)
         {

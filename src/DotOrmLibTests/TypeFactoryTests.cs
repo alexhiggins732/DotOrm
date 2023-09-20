@@ -20,7 +20,7 @@ namespace DotRpc.Tests
         {
             var coll = new ServiceCollection();
             coll.AddLogging();
-            coll.AddSingleton<IRpxProxyGenerator, RpcProxyGenerator>();
+            coll.AddSingleton<IRpcProxyGenerator, RpcProxyGenerator>();
             coll.AddSingleton<IRpcTypeFactory, RpcTypeFactory>();
             var sp = coll.BuildServiceProvider();
 

@@ -31,6 +31,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\DotOrmTestModels\DotOrmTestModels.csproj" />
 		<ProjectReference Include="..\DotRpc.TestCommon\DotRpc.TestCommon.csproj" />
+		<ProjectReference Include="..\DotRpc.TestServer\DotRpc.TestServer.csproj" />
 		<ProjectReference Include="..\DotRpc\DotRpc.csproj" />
 	</ItemGroup>
 </Project>

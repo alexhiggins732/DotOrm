@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "DotRpc.Examples.KeyValueString.Client": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:51504;http://localhost:51505"
+    }
+  }
+}

@@ -56,7 +56,7 @@ namespace DotRpc.Tests
         {
             var methodTests = new Dictionary<MethodInfo, string>
             {
-                { typeof(INameService).GetMethod(nameof(INameService.GenerateRpcMethodName)), "Testhost.IRpcHandler.GenerateRpcMethodNameWithMethodContract" },
+                { typeof(INameService).GetMethod(nameof(INameService.GenerateRpcMethodName)), "Testhost.NameService.GenerateRpcMethodNameWithMethodContract" },
             };
 
             methodTests.ToList().ForEach(x => GenerateRpcMethodName(new MethodTypeDescription(x.Key), x.Value));

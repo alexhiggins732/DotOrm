@@ -7,7 +7,250 @@ using System.Text;
 
 namespace DotRpc
 {
+    public class TypeNameService
+    {
+        public static string GetTypeAlias(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName)) return typeName ?? "";
 
+            var loweredName = typeName.ToLower().Trim();
+            switch (loweredName)
+            {
+
+                case "byte":
+                case "byte?":
+                case "sbyte":
+                case "sbyte?":
+                case "short":
+                case "short?":
+                case "ushort":
+                case "ushort?":
+                case "int":
+                case "int?":
+                case "uint":
+                case "uint?":
+                case "long":
+                case "long?":
+                case "ulong":
+                case "ulong?":
+                case "string":
+                case "float":
+                case "float?":
+                case "double":
+                case "double?":
+                case "decimal":
+                case "decimal?":
+                case "char":
+                case "char?":
+                case "bool":
+                case "bool?":
+
+                    return loweredName;
+
+
+                case "int8":
+                    return "sbyte";
+                case "int8?":
+                    return "sbyte?";
+                case "uint8":
+                    return "byte";
+                case "uint8?":
+                    return "byte?";
+
+                case "int16":
+                    return "short";
+                case "int16?":
+                    return "short?";
+                case "uint16":
+                    return "ushort";
+                case "uint16?":
+                    return "ushort?";
+                case "int32":
+                    return "int";
+                case "int32?":
+                    return "int?";
+                case "uint32":
+                    return "uint";
+                case "uint32?":
+                    return "uint?";
+                case "int64":
+                    return "long";
+                case "int64?":
+                    return "long?";
+                case "uint64":
+                    return "ulong";
+                case "uint64?":
+                    return "ulong?";
+                case "boolean":
+                    return "bool";
+                case "boolean?":
+                    return "bool?";
+                case "datetime":
+                case "date":
+                    return "DateTime";
+                case "datetime?":
+                case "date?":
+                    return "DateTime?";
+                case "dateonly":
+                    return "DateOnly";
+                case "dateonly?":
+                    return "DateOnly?";
+
+                case "timeonly":
+                    return "TimeOnly";
+                case "timeonly?":
+                    return "TimeOnly?";
+
+                case "datatimeoffset":
+                    return "DateTimeOffset";
+                case "datatimeoffset?":
+                    return "DateTimeOffset?";
+
+                case "timespan":
+                    return "TimeSpan";
+                case "timespan?":
+                    return "TimeSpan?";
+                // Add more switch statements for other C# system alias types here
+                case "guid":
+                    return "Guid";
+                case "guid?":
+                    return "Guid?";
+                default:
+                    return typeName;
+
+            }
+        }
+
+        public static string GetFullTypeName(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName)) return typeName ?? "";
+
+
+            switch (typeName.ToLower().Trim())
+            {
+
+                case "byte":
+                    return typeof(byte).FullName;
+                case "byte?":
+                    return typeof(byte?).FullName;
+                case "sbyte":
+                    return typeof(sbyte).FullName;
+                case "sbyte?":
+                    return typeof(sbyte?).FullName;
+
+                case "int16":
+                case "short":
+                    return typeof(short).FullName;
+                case "int16?":
+                case "short?":
+                    return typeof(short?).FullName;
+
+                case "uint16":
+                case "ushort":
+                    return typeof(ushort?).FullName;
+                case "uint16?":
+                case "ushort?":
+                    return typeof(ushort?).FullName;
+
+                case "int32":
+                case "int":
+                    return typeof(int).FullName;
+
+                case "int32?":
+                case "int?":
+                    return typeof(int?).FullName;
+
+                case "uint32":
+                case "uint":
+                    return typeof(uint).FullName;
+                case "uint32?":
+                case "uint?":
+                    return typeof(uint?).FullName;
+
+                case "int64":
+                case "long":
+                    return typeof(long).FullName;
+                case "int64?":
+                case "long?":
+                    return typeof(long).FullName;
+
+                case "uint64":
+                case "ulong":
+                    return typeof(ulong).FullName;
+
+                case "uint64?":
+                case "ulong?":
+                    return typeof(ulong?).FullName;
+
+                case "string":
+                    return typeof(string).FullName;
+
+                case "float":
+                    return typeof(float).FullName;
+                case "float?":
+                    return typeof(float?).FullName;
+
+                case "double":
+                    return typeof(double).FullName;
+                case "double?":
+                    return typeof(double?).FullName;
+
+                case "decimal":
+                    return typeof(decimal).FullName;
+                case "decimal?":
+                    return typeof(decimal?).FullName;
+
+                case "char":
+                    return typeof(char).FullName;
+                case "char?":
+                    return typeof(char?).FullName;
+
+                case "boolean":
+                case "bool":
+                    return typeof(bool).FullName;
+                case "boolean?":
+                case "bool?":
+                    return typeof(bool?).FullName;
+
+                case "datetime":
+                case "date":
+                    return typeof(DateTime).FullName;
+                case "datetime?":
+                case "date?":
+                    return typeof(DateTime?).FullName;
+
+                case "dateonly":
+                    return typeof(DateOnly).FullName;
+                case "dateonly?":
+                    return typeof(DateOnly?).FullName;
+
+                case "timeonly":
+                    return typeof(TimeOnly).FullName;
+                case "timeonly?":
+                    return typeof(TimeOnly?).FullName;
+
+                case "datatimeoffset":
+                    return typeof(DateTimeOffset).FullName;
+                case "datatimeoffset?":
+                    return typeof(DateTimeOffset?).FullName;
+
+                case "timespan":
+                    return typeof(TimeSpan).FullName;
+                case "timespan?":
+                    return typeof(TimeSpan?).FullName;
+                // Add more switch statements for other C# system alias types here
+                case "guid":
+                    return typeof(Guid).FullName;
+                case "guid?":
+                    return typeof(Guid?).FullName;
+
+                default:
+                    return typeName;
+
+            }
+
+        }
+    }
     public class NameService : INameService, ICSharpDeclarationProvider
     {
         public static ConcurrentDictionary<Type, string> SwaggerSchemaIds = new();
@@ -53,10 +296,20 @@ namespace DotRpc
 
         public string GenerateSwaggerSchemaId(Type type)
         {
+
             if (SwaggerSchemaIds.TryGetValue(type, out string? typeName))
                 return typeName;
 
+            if (type.IsGenericParameter)
+            {
+                var returnType = typeof(DotRpcRequest);
+                typeName = $"{ToPropertyName(returnType)}Of{type.Name}";
+                if (SwaggerSchemaNames.TryAdd(typeName, returnType)) return typeName;
 
+                int i = 0;
+                while (!SwaggerSchemaNames.TryAdd($"{typeName}{++i}", returnType)) ;
+                return $"{typeName}{i}";
+            }
 
             var dec = ToCSharpDeclaration(type);
             typeName = ToPropertyName(dec);
@@ -85,7 +338,7 @@ namespace DotRpc
                 if (SwaggerSchemaNames.TryAdd(typeName, type)) return typeName;
                 else if (SwaggerSchemaNames[typeName] == type) return typeName;
             }
- 
+
             int count = 1;
             while (true)
             {
@@ -99,7 +352,13 @@ namespace DotRpc
 
         public string GenerateRpcMethodName(MethodTypeDescription method)
         {
-            var contractTypeName = GetApiPathName(method.method) + "Contract";
+            var genericOverloads = method.method.GetGenericArguments().Select(x => x.Name).ToList();
+            string genericOverload = string.Empty;
+            if (genericOverloads.Count > 0)
+            {
+                genericOverload = $"{string.Join("", genericOverloads)}";
+            }
+            var contractTypeName = GetApiPathName(method.method) + $"{genericOverload}Contract";
             var type = method.method.DeclaringType;
             var att = type.GetRpcContract(true);//.GetCustomAttribute<RpcServiceAttribute>();
             var result = $"{att?.Namespace}.{att?.Name}.{contractTypeName}";
@@ -268,39 +527,41 @@ namespace DotRpc
             return ToPropertyName(methodDescription.method.Name);
         }
 
-        public string ToCSharpDeclaration(Type type, bool includeNamespace = false, bool includeAssemblyName = false)
+        public string ToCSharpDeclaration(Type type, bool includeNamespace = false, bool includeAssemblyName = false, bool useAlias = false)
         {
-            return CSharpDeclarationProvider.ToCSharpDeclaration(type, includeNamespace, includeAssemblyName);
+            return CSharpDeclarationProvider.ToCSharpDeclaration(type, includeNamespace, includeAssemblyName, useAlias);
         }
     }
 
     public interface ICSharpDeclarationProvider
     {
-        string ToCSharpDeclaration(Type type, bool includeNamespace = false, bool includeAssemblyName = false);
+        string ToCSharpDeclaration(Type type, bool includeNamespace = false, bool includeAssemblyName = false, bool useAlias = false);
     }
     public class CSharpDeclarationProvider : ICSharpDeclarationProvider
     {
 
 
-        public Lazy<INameService> nameService { get; }
-
-        public string ToCSharpDeclaration(Type type, bool includeNamespace = false, bool includeAssemblyName = false)
+        public string ToCSharpDeclaration(Type type, bool includeNamespace = false, bool includeAssemblyName = false, bool useAlias = false)
         {
-            string typeName = GetTypeName(type, includeNamespace);
+            string typeName = GetTypeName(type, includeNamespace, useAlias);
             if (includeAssemblyName)
                 typeName = $"{type.Assembly.ToPropertyName()}.{typeName}";
 
             return $"{typeName}";
         }
 
-        private string GetTypeName(Type type, bool includeNamespace)
+        private string GetTypeName(Type type, bool includeNamespace, bool useAlias = false)
         {
-            string typeName = includeNamespace ? type.FullName : type.Name;
+            string typeName = includeNamespace ? type.FullName : useAlias ? TypeNameService.GetTypeAlias(type.Name) : type.Name;
 
             if (type.IsGenericType)
             {
-                string genericArguments = string.Join(", ", type.GetGenericArguments().Select(t => GetTypeName(t, includeNamespace)));
-                typeName = $"{typeName.Substring(0, typeName.IndexOf('`'))}<{genericArguments}>";
+                string genericArguments = string.Join(", ", type.GetGenericArguments().Select(t => GetTypeName(t, includeNamespace, useAlias)));
+                var idx = typeName.IndexOf('`');
+                if (idx > -1)
+                    typeName = $"{typeName.Substring(0, typeName.IndexOf('`'))}<{genericArguments}>";
+                else
+                    typeName = $"{typeName}<{genericArguments}>";
             }
 
             return typeName;

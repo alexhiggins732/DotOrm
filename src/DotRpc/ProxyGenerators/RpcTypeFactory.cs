@@ -8,6 +8,10 @@ using System.Text.Json;
 namespace DotRpc
 {
     using Castle.DynamicProxy;
+    using Microsoft.Extensions.Logging;
+    using Newtonsoft.Json.Linq;
+    using System.Collections.Concurrent;
+    using System.Collections.Generic;
     using System.Reflection.Emit;
     using System.Reflection.Metadata;
     using System.Reflection.PortableExecutable;
@@ -17,10 +21,11 @@ namespace DotRpc
     public interface IRpcTypeFactory
     {
         Type GetMethodProxyType(MethodInfo method);
+
         RpcPayload GetPayload(int id, string name, string value);
     }
 
-    public interface IRpxProxyGenerator
+    public interface IRpcProxyGenerator
     {
         Type GetProxyType(MethodInfo method);
     }
@@ -28,19 +33,43 @@ namespace DotRpc
     {
         private ILogger<RpcTypeFactory> logger;
 
-        public RpcTypeFactory(ILoggerFactory loggerFactory, IRpxProxyGenerator proxyGenerator)
+        public RpcTypeFactory(ILoggerFactory loggerFactory, IRpcProxyGenerator proxyGenerator)
         {
             this.logger = loggerFactory.CreateLogger<RpcTypeFactory>();
             ProxyGenerator = proxyGenerator;
         }
 
-        public IRpxProxyGenerator ProxyGenerator { get; }
+        public IRpcProxyGenerator ProxyGenerator { get; }
 
+        //guard against Dependency Injection creating new instances of singletons.
+        static ConcurrentDictionary<MethodTypeDescription, Type> methodProxyTypes = new();
+        static ConcurrentDictionary<TypeDescription, Type> exampleProxyTypes = new();
         public Type GetMethodProxyType(MethodInfo method)
         {
-            var result = ProxyGenerator.GetProxyType(method);
-            return result;
+            try
+            {
+                var description = new MethodTypeDescription(method);
+
+                if (methodProxyTypes.TryGetValue(description, out var proxyType))
+                {
+                    return proxyType;
+                }
+                var exists = NameServiceExtensions.RpcMethodNameCache.TryGetValue(description, out var rpcMethodName);
+                if (exists)
+                {
+                    logger.LogWarning($"Warning: Generating existing proxy type for method {rpcMethodName}");
+                }
+                var result = methodProxyTypes.GetOrAdd(description, x => ProxyGenerator.GetProxyType(method));
+                return result;
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e, $"Error generating proxy for method: {method.Name} - {e}");
+                return null;
+            }
+
         }
+
 
         public RpcPayload GetPayload(int id, string name, string value)
         {
@@ -55,41 +84,34 @@ namespace DotRpc
 
     }
 
-    //public static class Compilation
-    //{
-    //    public static CompilationResult CompileAssemblyFromType(Type type)
-    //    {
-    //        var compilation = new System.Runtime.Loader.Compilation();
-    //        compilation.AddAssemblyFromType(type);
-    //        compilation.SetEntryPoint(type.GetMethod("MyMethod"));
 
-    //        return compilation.Emit();
-    //    }
-    //}
 
     #region AutoMapper
     //
-    public class RpcProxyGenerator : IRpxProxyGenerator
+    public class RpcProxyGenerator : IRpcProxyGenerator
     {
         private static readonly MethodInfo DelegateCombine = typeof(Delegate).GetMethod(nameof(Delegate.Combine), new[] { typeof(Delegate), typeof(Delegate) });
         private static readonly MethodInfo DelegateRemove = typeof(Delegate).GetMethod(nameof(Delegate.Remove));
         private static readonly EventInfo PropertyChanged = typeof(INotifyPropertyChanged).GetEvent(nameof(INotifyPropertyChanged.PropertyChanged));
         private static readonly ConstructorInfo ProxyBaseCtor = typeof(ProxyBase).GetConstructor(Type.EmptyTypes);
         private static readonly ModuleBuilder ProxyModule = CreateProxyModule();
-        private readonly LockingConcurrentDictionary<TypeDescription, Type> ProxyTypes;// = new(EmitProxy);
-        private readonly LockingConcurrentDictionary<MethodTypeDescription, Type> MethodProxyTypes; //= new(, EmitMethodProxy);
-        private readonly LockingConcurrentDictionary<MethodTypeDescription, Type> ClientProxyTypes; //= new(EmitClientProxy);
-        private readonly LockingConcurrentDictionary<MethodTypeDescription, Type> ServerProxyTypes;// = new(EmitServerProxy);
+        public readonly LockingConcurrentDictionary<TypeDescription, Type> ProxyTypes;// = new(EmitProxy);
+        public readonly LockingConcurrentDictionary<TypeDescription, Type> ExampleProxyTypes;// = new(EmitProxy);
+        public readonly LockingConcurrentDictionary<MethodTypeDescription, Type> MethodProxyTypes; //= new(, EmitMethodProxy);
+        public readonly LockingConcurrentDictionary<MethodTypeDescription, Type> ClientProxyTypes; //= new(EmitClientProxy);
+        public readonly LockingConcurrentDictionary<MethodTypeDescription, Type> ServerProxyTypes;// = new(EmitServerProxy);
         private ILogger<RpcProxyGenerator> logger;
-
+        public static LoggerFactory LoggerFactory;
         public RpcProxyGenerator(ILoggerFactory loggerFactory)
         {
-
+            LoggerFactory = LoggerFactory;
             this.logger = loggerFactory.CreateLogger<RpcProxyGenerator>();
             ProxyTypes = new(x => EmitProxy(loggerFactory, x));
+            ExampleProxyTypes = new(x => EmitExampleProxy(loggerFactory, x));
             MethodProxyTypes = new(x => EmitMethodProxy(loggerFactory, x));
             ClientProxyTypes = new(x => EmitClientProxy(loggerFactory, x));
             ServerProxyTypes = new(x => EmitServerProxy(loggerFactory, x));
+
         }
         private static ModuleBuilder CreateProxyModule()
         {
@@ -102,14 +124,16 @@ namespace DotRpc
 
         private static Type EmitClientProxy(ILoggerFactory loggerFactory, MethodTypeDescription typeDescription)
         {
-            var typeBuilder = GenerateType(typeDescription);
+            var result = GenerateType(typeDescription);
+            var typeBuilder = result.Builder;
             GenerateConstructor(typeBuilder);
             return typeBuilder.CreateTypeInfo().AsType();
 
         }
         private static Type EmitServerProxy(ILoggerFactory loggerFactory, MethodTypeDescription typeDescription)
         {
-            var typeBuilder = GenerateType(typeDescription);
+            var result = GenerateType(typeDescription);
+            var typeBuilder = result.Builder;
             GenerateConstructor(typeBuilder);
             return typeBuilder.CreateTypeInfo().AsType();
         }
@@ -125,20 +149,36 @@ namespace DotRpc
             var propLogger = loggerFactory.CreateLogger<PropertyEmitter>();
             var args = typeDescription.MethodArguments;
 
+            var typeName = typeDescription.GenerateRpcMethodName();
+            if (methodProxies.TryGetValue(typeName, out var methodProxy))
+            {
+                return methodProxy;
+            }
+
 
             var interfaceType = typeDescription.Type;
-            var typeBuilder = GenerateType(typeDescription,
+            var result = GenerateType(typeDescription,
                 new[] { CreateAttributeBuilder<DataContractAttribute>() },
                 implementedInterfaceTypes: new Type[] { typeof(IDataContract) });
+            var typeBuilder = result.Builder;
             GenerateConstructor(typeBuilder);
-            
 
-            var properties = GenerateProperties(logger);
+
+            var properties = GenerateProperties(logger, ref result.GenericParameters);
+            if (properties.Count == 0)
+            {
+                string bp = "";
+            }
+            //else
             GenerateConstructorForMethodArgs(typeBuilder, typeDescription, properties);
 
             //EmitClientProxy( typeDescription);
             // EmitServerProxy( typeDescription);
-            return typeBuilder.CreateTypeInfo().AsType();
+
+
+            var proxyType = typeBuilder.CreateTypeInfo().AsType();
+            methodProxies.TryAdd(typeBuilder.FullName, proxyType);
+            return proxyType;
 
             CustomAttributeBuilder CreateAttributeBuilder<AttributeType>(object[]? constructorArgs = null, object? properties = null)
             {
@@ -171,7 +211,8 @@ namespace DotRpc
                 }
 
             }
-            Dictionary<string, PropertyEmitter> GenerateProperties(ILogger propLogger)
+            Dictionary<string, PropertyEmitter> GenerateProperties(ILogger propLogger,
+                ref Dictionary<string, GenericTypeParameterBuilder> genericParameters)
             {
                 var fieldBuilders = new Dictionary<string, PropertyEmitter>();
                 int order = 0;
@@ -195,7 +236,8 @@ namespace DotRpc
                         var JsonProperty = CreateAttributeBuilder<Newtonsoft.Json.JsonPropertyAttribute>(properties: new { Order = order });
                         order++;
                         var atts = new CustomAttributeBuilder[] { dataMember, jsonPropertyOrder, JsonProperty };
-                        fieldBuilders.Add(property.Name, new PropertyEmitter(logger, typeBuilder, parameterProperty, null, atts));
+                        var propEmitter = new PropertyEmitter(logger, typeBuilder, parameterProperty, null, ref genericParameters, atts);
+                        fieldBuilders.Add(property.Name, propEmitter);
 
                     }
                 }
@@ -223,36 +265,40 @@ namespace DotRpc
             Dictionary<string, PropertyEmitter> properties)
         {
             var argumentTypes = method.MethodArguments.Select(x => x.Type).ToArray();
+            //if there are no method argments, create a constructor that takes an empty object array
+            //  to comply with the IDataContract interface.
+            if (argumentTypes.Length == 0) { argumentTypes = new Type[] { typeof(object[]) }; }
             var constructorBuilder = typeBuilder.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, argumentTypes);
             var ctorIl = constructorBuilder.GetILGenerator();
             ctorIl.Emit(OpCodes.Ldarg_0);
             ctorIl.Emit(OpCodes.Call, ProxyBaseCtor);
-            var argIndex = 1;
+            var argIndex = 0;
             foreach (var arg in method.MethodArguments)
             {
 
                 var backingField = properties[arg.Name]._fieldBuilder;
                 ctorIl.Emit(OpCodes.Ldarg_0);
-                ctorIl.Emit(OpCodes.Ldarg_S, argIndex);
+                ctorIl.Emit(OpCodes.Ldarg_S, ++argIndex);
                 ctorIl.Emit(OpCodes.Stfld, backingField);
             }
             ctorIl.Emit(OpCodes.Ret);
         }
 
+        class GenerateTypeResult
+        {
+            public TypeBuilder Builder;
+            public Dictionary<string, GenericTypeParameterBuilder> GenericParameters;
+        }
 
-        static TypeBuilder GenerateType(
+        static ConcurrentDictionary<string, Type> methodProxies = new();
+        static GenerateTypeResult GenerateType(
             MethodTypeDescription typeDescription,
             IEnumerable<CustomAttributeBuilder>? customAttributes = null,
             IEnumerable<Type>? implementedInterfaceTypes = null)
         {
-            var interfaceType = typeDescription.Type;
+            string typeName = typeDescription.GenerateRpcMethodName();
 
-            var propertyNames = string.Join("_", typeDescription.MethodArguments.Select(p => p.Name));
-            var typeName = $"Proxy_{interfaceType.Name}_{typeDescription.method.Name}_{typeDescription.GetHashCode()}_{propertyNames}";
-            const int MaxTypeNameLength = 1023;
-            typeName = typeName.Substring(0, Math.Min(MaxTypeNameLength, typeName.Length));
-            typeName = typeDescription.GenerateRpcMethodName();
-            Debug.WriteLine(typeName, "Emitting proxy type");
+            Debug.WriteLine(typeName, $"Emitting proxy type: {typeName}");
             var builder = ProxyModule.DefineType(typeName,
                 TypeAttributes.Class | TypeAttributes.Sealed | TypeAttributes.Public, typeof(RpcProxyBase),
                  implementedInterfaceTypes?.ToArray() ?? Type.EmptyTypes);
@@ -263,16 +309,226 @@ namespace DotRpc
                     builder.SetCustomAttribute(att);
                 }
             }
-            return builder;
+            var result = new GenerateTypeResult { Builder = builder, GenericParameters = new() };
+            var declaringType = typeDescription.method.DeclaringType;
+            if (declaringType is null)
+            {
+                throw new ArgumentNullException(nameof(declaringType));
+            }
+            if (declaringType.IsGenericType)
+            {
+                var genericArguments = declaringType.GetGenericArguments();
+                var genericArgumentNames = genericArguments.Select(x => x.Name).ToArray();
+                var genericParameterBuilders = builder.DefineGenericParameters(genericArgumentNames);
+                result.GenericParameters = new();
+                genericParameterBuilders.ToList().ForEach(x => result.GenericParameters.Add(x.Name, x));
+            }
+
+            if (typeDescription.method.IsGenericMethod)
+            {
+                var genericArguments = typeDescription.method.GetGenericArguments();
+                var genericArgumentNames = genericArguments.Select(x => x.Name).ToArray();
+                var genericParameterBuilders = builder.DefineGenericParameters(genericArgumentNames);
+                result.GenericParameters ??= new();
+
+
+                genericParameterBuilders.ToList().ForEach(x => result.GenericParameters.Add(x.Name, x));
+            }
+
+            return result;
         }
 
-        private static Type EmitProxy(ILoggerFactory loggerFactory, TypeDescription typeDescription)
+        static GenerateTypeResult GenerateType(
+            TypeDescription typeDescription,
+            IEnumerable<CustomAttributeBuilder>? customAttributes = null,
+            IEnumerable<Type>? implementedInterfaceTypes = null)
+        {
+            string typeName = typeDescription.GenerateRpcTypeName();
+
+            Debug.WriteLine(typeName, $"Emitting proxy type: {typeName}");
+            var builder = ProxyModule.DefineType(typeName,
+                TypeAttributes.Class | TypeAttributes.Sealed | TypeAttributes.Public, typeof(RpcProxyBase),
+                 implementedInterfaceTypes?.ToArray() ?? Type.EmptyTypes);
+            if (customAttributes != null)
+            {
+                foreach (var att in customAttributes)
+                {
+                    builder.SetCustomAttribute(att);
+                }
+            }
+            var result = new GenerateTypeResult { Builder = builder, GenericParameters = new() };
+            var declaringType = typeDescription.Type;
+            if (declaringType is null)
+            {
+                throw new ArgumentNullException(nameof(declaringType));
+            }
+            if (declaringType.IsGenericType)
+            {
+                var genericArguments = declaringType.GetGenericArguments().Distinct().ToList();
+                //var names= genericArguments.Select(x=> NameServiceExtensions.Instance.GenerateSwaggerSchemaId(x));
+                var genericArgumentNames = genericArguments.Select(x => x.Name).ToArray();
+                var genericParameterBuilders = builder.DefineGenericParameters(genericArgumentNames);
+                result.GenericParameters = new();
+                genericParameterBuilders.ToList().ForEach(x => result.GenericParameters.Add(x.Name, x));
+            }
+
+            return result;
+        }
+
+
+        static ConcurrentDictionary<TypeDescription, Type> exampleProxies = new();
+
+        public static Type EmitExampleProxy(ILoggerFactory loggerFactory, Type type)
+        {
+            var typeProps = type.GetProperties();
+            var props = typeProps.Select(x =>
+            {
+                if (x.PropertyType.IsGenericType || x.PropertyType.IsGenericParameter)
+                    //return new PropertyDescription(x.Name, typeof(string), true);
+                    return GetExamplePropertyDescription(loggerFactory, x, type);
+                else
+                    return new PropertyDescription(x);
+            }).ToArray();
+            var description = new TypeDescription(type, props.ToArray());
+            return exampleProxies.GetOrAdd(description, type => EmitExampleProxy(loggerFactory, description));
+        }
+
+        static Type GetPrimitiveExampleType(Type type)
+        {
+            if (type.IsGenericType)
+            {
+                var args = type.GetGenericArguments();
+                var exampleTypes = args.Select(x => GetPrimitiveExampleType(x)).ToArray();
+                var genericExampleType = type.MakeGenericType(exampleTypes);
+                return genericExampleType;
+            }
+            var primitiveExampleTypes = PrimitiveTypes()
+                .FirstOrDefault(x => x.IsAssignableFrom(type) || type.IsAssignableFrom(x));
+            if (primitiveExampleTypes is not null)
+            {
+                return primitiveExampleTypes;
+            }
+            else
+            {
+                return typeof(string);
+            }
+        }
+        static PropertyDescription GetExamplePropertyDescription(ILoggerFactory loggerFactory, PropertyInfo property, Type type)
+        {
+            if (!property.PropertyType.IsGenericParameter && !property.PropertyType.IsGenericType)
+            {
+                return new PropertyDescription(property.Name, property.PropertyType, true);
+            }
+            //    throw new NotFiniteNumberException();
+            var propType = property.PropertyType;
+            if (propType.IsGenericType)
+            {
+                var exampleType= GetPrimitiveExampleType(propType);
+                return new PropertyDescription(property.Name, exampleType, true);
+            }
+            var constraints = property.PropertyType.GetGenericParameterConstraints();
+            if (constraints.Length == 0)
+                return new PropertyDescription(property.Name, typeof(string), true);
+
+            var primitiveExampleTypes = PrimitiveTypes()
+                .FirstOrDefault(x => x.IsAssignableFrom(property.PropertyType) || property.PropertyType.IsAssignableFrom(x));
+            if (primitiveExampleTypes is not null)
+            {
+                return new PropertyDescription(property.Name, primitiveExampleTypes, true);
+            }
+            else
+            {
+
+                //TODO: find a class that meets the constraints of typeof(t)
+                return new PropertyDescription(property.Name, typeof(string), true);
+
+            }
+        }
+
+        static Type[]? _primitiveTypes = null;
+        static Type[] PrimitiveTypes()
+        {
+            if (_primitiveTypes is null)
+            {
+                var baseTypes = primitiveBaseTypes;
+                var nullableTypes = baseTypes.Where(x => x.IsValueType).Select(x => GetNullableType(x));
+                var baseAndNullable = baseTypes.Concat(nullableTypes).ToArray();
+                var arrayTypes = baseAndNullable.Select(x => GetArrayType(x));
+                var enumerableTypes = baseAndNullable.Select(x => GetEnumerableType(x));
+                _primitiveTypes = baseAndNullable.Concat(arrayTypes).Concat(enumerableTypes).ToArray();
+            }
+            return _primitiveTypes;
+        }
+
+        static Type GetNullableType(Type x) => typeof(Nullable<>).MakeGenericType(x);
+        static Type GetArrayType(Type x) => x.MakeArrayType();
+        static Type GetEnumerableType(Type x) => typeof(IEnumerable<>).MakeGenericType(x);
+        static Type[] primitiveBaseTypes = new Type[]
+        {
+            typeof(string),
+            typeof(int),
+            typeof(Guid),
+            typeof(bool),
+            typeof(byte),
+            typeof(sbyte),
+            typeof(char),
+            typeof(short),
+            typeof(ushort),
+            typeof(uint),
+            typeof(long),
+            typeof(ulong),
+            typeof(float),
+            typeof(double),
+            typeof(decimal),
+            typeof(DateTime),
+            typeof(DateTimeOffset),
+
+        };
+
+        public static Type EmitExampleProxy(ILoggerFactory loggerFactory, TypeDescription typeDescription)
+        {
+            var propLogger = loggerFactory.CreateLogger<PropertyEmitter>();
+            var logger = loggerFactory.CreateLogger(typeof(RpcProxyGenerator));
+            logger.LogInformation($"Emitting proxy for type {typeDescription.Type.FullName}");
+            string typeName = typeDescription.Type.DotRpcSwaggerSchemaIdGenerator() + "Contract";
+            Debug.WriteLine(typeName, $"Emitting proxy type: {typeName}");
+            var interfaceType = typeDescription.Type;
+            var result = GenerateType(typeDescription);
+
+
+            //var typeBuilder = ProxyModule.DefineType(typeName,
+            //    TypeAttributes.Class | TypeAttributes.Sealed | TypeAttributes.Public, typeof(RpcProxyBase),
+            //      Type.EmptyTypes);
+            GenerateConstructor(result.Builder);
+
+
+            foreach (var prop in typeDescription.AdditionalProperties)
+            {
+                var propEmitter = new PropertyEmitter(logger, result.Builder, prop, null, ref result.GenericParameters);
+            }
+
+            //EmitClientProxy( typeDescription);
+            // EmitServerProxy( typeDescription);
+            var exampleType = result.Builder.CreateTypeInfo().AsType();
+            if (exampleType.IsGenericType)
+            {
+                var genericArgs = exampleType.GetGenericArguments();
+                var exampleTypes = genericArgs.Select(x => GetPrimitiveExampleType(x)).ToArray();
+                var genericExampleType = exampleType.MakeGenericType(exampleTypes);
+                exampleType= genericExampleType;
+            }
+            return exampleType;
+
+        }
+        public static Type EmitProxy(ILoggerFactory loggerFactory, TypeDescription typeDescription)
         {
             var propLogger = loggerFactory.CreateLogger<PropertyEmitter>();
             var logger = loggerFactory.CreateLogger(typeof(RpcProxyGenerator));
             logger.LogInformation($"Emitting proxy for type {typeDescription.Type.FullName}");
             var interfaceType = typeDescription.Type;
-            var typeBuilder = GenerateType();
+            //var typeBuilder = GenerateType();
+            var result = GenerateType(typeDescription);
+            var typeBuilder = result.Builder;
             GenerateConstructor();
             FieldBuilder propertyChangedField = null;
             if (typeof(INotifyPropertyChanged).IsAssignableFrom(interfaceType))
@@ -280,18 +536,18 @@ namespace DotRpc
                 GeneratePropertyChanged();
             }
             GenerateFields();
-            return typeBuilder.CreateTypeInfo().AsType();
-            TypeBuilder GenerateType()
-            {
-                var propertyNames = string.Join("_", typeDescription.AdditionalProperties.Select(p => p.Name));
-                var typeName = $"Proxy_{interfaceType.FullName}_{typeDescription.GetHashCode()}_{propertyNames}";
-                const int MaxTypeNameLength = 1023;
-                typeName = typeName.Substring(0, Math.Min(MaxTypeNameLength, typeName.Length));
-                Debug.WriteLine(typeName, "Emitting proxy type");
-                return ProxyModule.DefineType(typeName,
-                    TypeAttributes.Class | TypeAttributes.Sealed | TypeAttributes.Public, typeof(ProxyBase),
-                    interfaceType.IsInterface ? new[] { interfaceType } : Type.EmptyTypes);
-            }
+            return result.Builder.CreateTypeInfo().AsType();
+            //TypeBuilder GenerateType()
+            //{
+            //    var propertyNames = string.Join("_", typeDescription.AdditionalProperties.Select(p => p.Name));
+            //    var typeName = $"Proxy_{interfaceType.FullName}_{typeDescription.GetHashCode()}_{propertyNames}";
+            //    const int MaxTypeNameLength = 1023;
+            //    typeName = typeName.Substring(0, Math.Min(MaxTypeNameLength, typeName.Length));
+            //    Debug.WriteLine(typeName, "Emitting proxy type");
+            //    return ProxyModule.DefineType(typeName,
+            //        TypeAttributes.Class | TypeAttributes.Sealed | TypeAttributes.Public, typeof(ProxyBase),
+            //        interfaceType.IsInterface ? new[] { interfaceType } : Type.EmptyTypes);
+            //}
             void GeneratePropertyChanged()
             {
                 propertyChangedField = typeBuilder.DefineField(PropertyChanged.Name, typeof(PropertyChangedEventHandler), FieldAttributes.Private);
@@ -329,7 +585,7 @@ namespace DotRpc
                     }
                     else
                     {
-                        fieldBuilders.Add(property.Name, new PropertyEmitter(propLogger, typeBuilder, property, propertyChangedField));
+                        fieldBuilders.Add(property.Name, new PropertyEmitter(propLogger, typeBuilder, property, propertyChangedField, ref result.GenericParameters));
                     }
                 }
             }
@@ -368,64 +624,89 @@ namespace DotRpc
         public Type GetProxyType(MethodInfo methodInfo) => MethodProxyTypes.GetOrAdd(new(methodInfo));
         public Type GetSimilarType(Type sourceType, IEnumerable<PropertyDescription> additionalProperties) =>
             ProxyTypes.GetOrAdd(new(sourceType, additionalProperties.OrderBy(p => p.Name).ToArray()));
-        public class PropertyEmitter
-        {
-            private static readonly MethodInfo ProxyBaseNotifyPropertyChanged = typeof(ProxyBase).GetInstanceMethod("NotifyPropertyChanged");
-            public readonly FieldBuilder _fieldBuilder;
-            public readonly MethodBuilder _getterBuilder;
-            public readonly PropertyBuilder _propertyBuilder;
-            public readonly MethodBuilder? _setterBuilder;
-            public PropertyEmitter(ILogger logger, TypeBuilder owner, PropertyDescription property, FieldBuilder propertyChangedField,
-                IEnumerable<CustomAttributeBuilder>? customAttributes = null)
-            {
-                logger.LogInformation($"Creating property for {property.Name}");
-                var name = property.Name;
-                var propertyType = property.Type;
-                _fieldBuilder = owner.DefineField($"<{name}>", propertyType, FieldAttributes.Private);
-                _propertyBuilder = owner.DefineProperty(name, PropertyAttributes.None, propertyType, null);
 
-                // Apply custom attributes to the property
-                if (customAttributes != null)
-                {
-                    foreach (var attribute in customAttributes)
-                    {
-                        _propertyBuilder.SetCustomAttribute(attribute);
-                    }
-                }
-
-                _getterBuilder = owner.DefineMethod($"get_{name}",
-                    MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.HideBySig |
-                    MethodAttributes.SpecialName, propertyType, Type.EmptyTypes);
-                ILGenerator getterIl = _getterBuilder.GetILGenerator();
-                getterIl.Emit(OpCodes.Ldarg_0);
-                getterIl.Emit(OpCodes.Ldfld, _fieldBuilder);
-                getterIl.Emit(OpCodes.Ret);
-                _propertyBuilder.SetGetMethod(_getterBuilder);
-                if (!property.CanWrite)
-                {
-                    return;
-                }
-                _setterBuilder = owner.DefineMethod($"set_{name}",
-                    MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.HideBySig |
-                    MethodAttributes.SpecialName, typeof(void), new[] { propertyType });
-                ILGenerator setterIl = _setterBuilder.GetILGenerator();
-                setterIl.Emit(OpCodes.Ldarg_0);
-                setterIl.Emit(OpCodes.Ldarg_1);
-                setterIl.Emit(OpCodes.Stfld, _fieldBuilder);
-                if (propertyChangedField != null)
-                {
-                    setterIl.Emit(OpCodes.Ldarg_0);
-                    setterIl.Emit(OpCodes.Dup);
-                    setterIl.Emit(OpCodes.Ldfld, propertyChangedField);
-                    setterIl.Emit(OpCodes.Ldstr, name);
-                    setterIl.Emit(OpCodes.Call, ProxyBaseNotifyPropertyChanged);
-                }
-                setterIl.Emit(OpCodes.Ret);
-                _propertyBuilder.SetSetMethod(_setterBuilder);
-            }
-            public Type PropertyType => _propertyBuilder.PropertyType;
-        }
     }
+    public class PropertyEmitter
+    {
+        private static readonly MethodInfo ProxyBaseNotifyPropertyChanged = typeof(ProxyBase).GetInstanceMethod("NotifyPropertyChanged");
+        public readonly FieldBuilder _fieldBuilder;
+        public readonly MethodBuilder _getterBuilder;
+        public readonly PropertyBuilder _propertyBuilder;
+        public readonly MethodBuilder? _setterBuilder;
+        public PropertyEmitter(ILogger logger, TypeBuilder owner, PropertyDescription property, FieldBuilder propertyChangedField,
+            ref Dictionary<string, GenericTypeParameterBuilder> genericParameters,
+            IEnumerable<CustomAttributeBuilder>? customAttributes = null)
+        {
+            logger.LogInformation($"Creating property for {property.Name}");
+            var name = property.Name;
+            var propertyType = property.Type;
+            if (propertyType.IsGenericParameter || propertyType.IsGenericType)
+            {
+                if (genericParameters is not null && genericParameters.ContainsKey(propertyType.Name))
+                {
+                    propertyType = genericParameters[propertyType.Name];
+                }
+                else
+                {
+                    genericParameters ??= new();
+                    var genericArguments = propertyType.GetGenericArguments();
+                    var genericArgumentNames = genericArguments.Select(x => x.Name).ToArray();
+                    var genericParameterBuilders = owner.DefineGenericParameters(genericArgumentNames);
+                    foreach (var b in genericParameterBuilders)
+                    {
+                        genericParameters.Add(b.Name, b);
+                    }
+                    //genericParameterBuilders.ToList().ForEach(x => genericParameters.Add(x.Name, x));
+
+                    logger.LogWarning($"Invalid generic parameter defined: {propertyType.Name}");
+                }
+
+            }
+            _fieldBuilder = owner.DefineField($"<{name}>", propertyType, FieldAttributes.Private);
+            _propertyBuilder = owner.DefineProperty(name, PropertyAttributes.None, propertyType, null);
+
+            // Apply custom attributes to the property
+            if (customAttributes != null)
+            {
+                foreach (var attribute in customAttributes)
+                {
+                    _propertyBuilder.SetCustomAttribute(attribute);
+                }
+            }
+
+            _getterBuilder = owner.DefineMethod($"get_{name}",
+                MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.HideBySig |
+                MethodAttributes.SpecialName, propertyType, Type.EmptyTypes);
+            ILGenerator getterIl = _getterBuilder.GetILGenerator();
+            getterIl.Emit(OpCodes.Ldarg_0);
+            getterIl.Emit(OpCodes.Ldfld, _fieldBuilder);
+            getterIl.Emit(OpCodes.Ret);
+            _propertyBuilder.SetGetMethod(_getterBuilder);
+            if (!property.CanWrite)
+            {
+                return;
+            }
+            _setterBuilder = owner.DefineMethod($"set_{name}",
+                MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.HideBySig |
+                MethodAttributes.SpecialName, typeof(void), new[] { propertyType });
+            ILGenerator setterIl = _setterBuilder.GetILGenerator();
+            setterIl.Emit(OpCodes.Ldarg_0);
+            setterIl.Emit(OpCodes.Ldarg_1);
+            setterIl.Emit(OpCodes.Stfld, _fieldBuilder);
+            if (propertyChangedField != null)
+            {
+                setterIl.Emit(OpCodes.Ldarg_0);
+                setterIl.Emit(OpCodes.Dup);
+                setterIl.Emit(OpCodes.Ldfld, propertyChangedField);
+                setterIl.Emit(OpCodes.Ldstr, name);
+                setterIl.Emit(OpCodes.Call, ProxyBaseNotifyPropertyChanged);
+            }
+            setterIl.Emit(OpCodes.Ret);
+            _propertyBuilder.SetSetMethod(_setterBuilder);
+        }
+        public Type PropertyType => _propertyBuilder.PropertyType;
+    }
+
     public abstract class ProxyBase : IDataContract
     {
         public ProxyBase() { }
@@ -475,6 +756,10 @@ namespace DotRpc
             foreach (var property in MethodArguments)
             {
                 hashCode.Add(property);
+            }
+            foreach (var genericArgument in method.GetGenericArguments())
+            {
+                hashCode.Add(genericArgument.FullName);
             }
             return hashCode.ToHashCode();
         }

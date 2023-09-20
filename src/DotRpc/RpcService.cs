@@ -2,13 +2,20 @@
 using Castle.DynamicProxy;
 using DotRpc.RpcClient;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
-
+using System.Collections;
 using System.ComponentModel.Design.Serialization;
+using System.Diagnostics;
+using System.Diagnostics.Contracts;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 
@@ -30,8 +37,8 @@ namespace DotRpc
             Namespace = @namespace.ToPropertyName();
             CallbackContract = callBackContract;
         }
-        public Type? CallbackContract { get; set; } 
-        public string Name { get; set; } 
+        public Type? CallbackContract { get; set; }
+        public string Name { get; set; }
         public string Namespace { get; set; }
     }
 
@@ -131,6 +138,18 @@ namespace DotRpc
         }
         public IDataContract Map(Type requestType, object[] args)
         {
+            try
+            {
+                if (args is null || args.Length == 0)
+                {
+                    var res = Activator.CreateInstance(requestType);
+                    return (IDataContract)res;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Type {requestType} does not have a default constructo");
+            }
             var result = Activator.CreateInstance(requestType, args);
             if (result is null)
                 throw new Exception($"Failed to create instance of {requestType.Name} from args: {string.Join(", ", args)} ");
@@ -292,6 +311,13 @@ namespace DotRpc
         object HandleRequest(Type serviceType, MethodInfo method, IDataContract request);
         object HandleRequest(Type serviceType, MethodInfo method, object?[] args);
     }
+    public interface IRpcEndpointProvider { string Endpoint { get; set; } }
+    public class RpcEndpointProvider : IRpcEndpointProvider
+    {
+        public string Endpoint { get; set; }
+        public RpcEndpointProvider() { Endpoint = "https://localhost:5001"; }
+        public RpcEndpointProvider(string endpoint) { Endpoint = endpoint; }
+    }
     public class RpcHandler : IRpcHandler
     {
         private readonly IServiceProvider serviceProvider;
@@ -323,7 +349,28 @@ namespace DotRpc
         public object HandleRequest(Type ServiceType, MethodInfo method, object?[]? args)
         {
             var service = serviceProvider.GetService(ServiceType);
-            var result = method.Invoke(service, args);
+            object result = null!;
+            if (method.IsGenericMethod)
+            {
+                List<Type> argumentTypes = new();
+                var methodParameters = method.GetParameters();
+                for (var i = 0; i < methodParameters.Length; i++)
+                {
+                    if (methodParameters[i].ParameterType.IsGenericParameter)
+                    {
+                        argumentTypes.Add(args[i].GetType());
+                    }
+                }
+
+                var argTypes = argumentTypes.ToArray();
+                var genericMethod = method.MakeGenericMethod(argTypes);
+                result = genericMethod.Invoke(service, args);
+
+            }
+            else
+            {
+                result = method.Invoke(service, args);
+            }
             return result;
         }
     }
@@ -333,10 +380,12 @@ namespace DotRpc
         public RpcPayload Invoke(string endpoint, MethodInfo method, object[] args);
     }
 
-    public interface IRpcClient<TService>
+    public interface IRpcService { }
+    public interface IRpcClient<TService> :IRpcService
     {
         TService Service { get; }
     }
+
 
     public class RpcClient<TService> : IRpcClient<TService>
         where TService : class
@@ -346,63 +395,398 @@ namespace DotRpc
         public TService Service { get; set; }
 
 
-        public RpcClient(IRpcConfigurationProvider rpcConfiguration, IRpcTypeFactory typeFactory)
+        public RpcClient(ILoggerFactory loggerFactory, IRpcConfigurationProvider rpcConfiguration, IRpcTypeFactory typeFactory, IRpcEndpointProvider rpcEndpointProvider)
         {
             var gen = new Castle.DynamicProxy.ProxyGenerator();
 
-            IInterceptor interceptor = new RpcClientServiceInterceptor(rpcConfiguration, typeFactory);
+            IInterceptor interceptor = new RpcClientServiceInterceptor(loggerFactory, rpcConfiguration, typeFactory, rpcEndpointProvider);
             this.Service = gen.CreateInterfaceProxyWithoutTarget<TService>(interceptor);
             this.rpcConfiguration = rpcConfiguration;
         }
+        //public RpcClient(IServiceProvider sp)
+        //    : this   (
+        //          sp.GetRequiredService<ILoggerFactory>(),
+        //          sp.GetRequiredService<IRpcConfigurationProvider>(),
+        //          sp.GetRequiredService<IRpcTypeFactory>(),
+        //          sp.GetRequiredService<IRpcEndpointProvider>()
+        //          )
+        //{
+
+        //}
+
 
         public class RpcClientServiceInterceptor : IInterceptor
         {
+            private ILogger<RpcClient<TService>.RpcClientServiceInterceptor> logger;
+
             public IRpcTypeFactory TypeFactory { get; }
+            public IRpcEndpointProvider RpcEndpointProvider { get; }
 
             private readonly IRpcConfigurationProvider rpcConfiguration;
 
-            public RpcClientServiceInterceptor(IRpcConfigurationProvider rpcConfiguration, IRpcTypeFactory typeFactory)
+            public RpcClientServiceInterceptor(
+                ILoggerFactory loggerFactory,
+                IRpcConfigurationProvider rpcConfiguration,
+                IRpcTypeFactory typeFactory,
+                IRpcEndpointProvider rpcEndpointProvider)
             {
+                logger = loggerFactory.CreateLogger<RpcClientServiceInterceptor>();
                 TypeFactory = typeFactory;
+                RpcEndpointProvider = rpcEndpointProvider;
                 this.rpcConfiguration = rpcConfiguration;
             }
             public void Intercept(IInvocation invocation)
             {
                 var value = TypeFactory.GetMethodProxyType(invocation.Method);
 
+                bool isGenericCall = invocation.Method.IsGenericMethod || invocation.Method.DeclaringType.IsGenericType;
+                List<Type> genericArgumentTypes = new();
+
+                //Todo implement generic service call.
+                if (invocation.Method.IsGenericMethod)
+                {
+                    var genericArgs = invocation.Method.GetGenericArguments();
+                    if (genericArgs != null)
+                    {
+                        genericArgumentTypes.AddRange(genericArgs);
+                    }
+                }
+
+                var serviceType = invocation.Method.DeclaringType;
                 var formatter = new DataContractRequestFormatter();
-                var contract = formatter.Map(value, invocation.Arguments);
+                IDataContract contract = null!;
+
+                string[] typeArgumentTypes = null!;
+                if (value.IsGenericType)
+                {
+                    var declaring = invocation.Method.DeclaringType;
+                    var typeGenericAgs = declaring.GetGenericArguments();
+
+
+                    //var genericParameters = declaring.GetGenericParameterConstraints();
+                    var allGenericArgs = genericArgumentTypes.Concat(typeGenericAgs).ToArray();
+                    var genericContractType = value.MakeGenericType(allGenericArgs.ToArray());
+                    typeArgumentTypes = typeGenericAgs.Select(x => x.FullName).ToArray();
+                    var genericContractArgs = genericContractType.GetGenericArguments();
+                    contract = formatter.Map(genericContractType, invocation.Arguments);
+                }
+                else
+                {
+                    contract = formatter.Map(value, invocation.Arguments);
+                }
+
+                string?[]? genericParameterTypes = genericArgumentTypes.Select(x => x.FullName).ToArray();
+
+
 
 
                 var config = rpcConfiguration.GetEndpointConfiguration(invocation.Method.DeclaringType, invocation.Method);
                 var path = config.RouteEndpoint;
                 using var client = new HttpClient();
-                var endpoint = $"https://localhost:63601{path}";
-
+                //var endpoint = $"https://localhost:63601{path}";
+                var endpoint = $"{RpcEndpointProvider.Endpoint}{path}";
                 HttpResponseMessage response = null!;
                 bool useNewtonSoft = true;
+                var request = !isGenericCall ? contract
+                    : !value.IsGenericType ? (object)new DotRpcRequest(contract, genericParameterTypes)
+                    : (object)new DotRpcGenericServiceRequest(contract, genericParameterTypes, typeArgumentTypes);
+                string requestJson = null!;
                 if (useNewtonSoft)
                 {
-                    var nsJson = Newtonsoft.Json.JsonConvert.SerializeObject(contract);
-                    var content = new StringContent(nsJson, Encoding.UTF8, "application/json");
+
+                    requestJson = Newtonsoft.Json.JsonConvert.SerializeObject(request, Newtonsoft.Json.Formatting.Indented);
+                    var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
                     response = client.PostAsync(endpoint, content).ConfigureAwait(false).GetAwaiter().GetResult();
                 }
                 else
                 {
                     //      var json = JsonSerializer.Serialize(contract);
-                    response = client.PostAsJsonAsync(endpoint, contract).ConfigureAwait(false).GetAwaiter().GetResult();
+                    requestJson = JsonSerializer.Serialize(contract);
+                    var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+                    response = client.PostAsync(endpoint, content).ConfigureAwait(false).GetAwaiter().GetResult();
 
                 }
 
 
-                response.EnsureSuccessStatusCode();
-                var result = response.Content.ReadFromJsonAsync(config.ReturnType).ConfigureAwait(false).GetAwaiter().GetResult();
-                invocation.ReturnValue = result;
+                //response.EnsureSuccessStatusCode();
+
+                if (useNewtonSoft)
+                {
+                    try
+                    {
+                        response.EnsureSuccessStatusCode();
+
+                        var jsonResult = response.Content.ReadAsStringAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+                        try
+                        {
+                            var result = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonResult, invocation.Method.ReturnType);
+                            invocation.ReturnValue = result;
+                        }
+                        catch (Exception ex)
+                        {
+
+                            var error = Newtonsoft.Json.JsonConvert.DeserializeObject<DotRpcErrorPayload>(jsonResult);
+                            if (error is not null)
+                            {
+                                var dotRpcError = new DotRpcError(error);
+                                logger.LogError(ex, $"Error converting jsonResult to return type '{config.ReturnType}' - json {jsonResult} - {dotRpcError}");
+                                throw dotRpcError;
+                            }
+                            else
+                                throw;
+
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, $"Error executing RPC call '{endpoint}' with request json {requestJson} - {ex}");
+                        throw;
+                    }
+
+                }
+                else
+                {
+                    var result = response.Content.ReadFromJsonAsync(config.ReturnType).ConfigureAwait(false).GetAwaiter().GetResult();
+                    invocation.ReturnValue = result;
+                }
+
+
                 //invocation.Proceed();
 
 
 
             }
         }
+    }
+
+    public class DotRpcErrorPayload
+    {
+        public DotRpcErrorPayload() { }
+
+        public string Message { get; set; }
+        public string TypeName { get; set; }
+        public string StackTrace { get; set; }
+        public string Details { get; set; }
+        public string Source { get; set; }
+        public DotRpcErrorPayload InnerException { get; set; }
+    }
+    public class DotRpcError : Exception
+    {
+        public DotRpcError() { }
+        public DotRpcError(Exception ex)
+        {
+            this.Message = ex.Message;
+            this.TypeName = ex.GetType().FullName;
+            this.StackTrace = ex.StackTrace.ToString();
+            this.Details = ex.ToString();
+            base.Source = ex.Source;
+            if (ex.InnerException != null)
+            {
+                var inner = new DotRpcError(ex.InnerException);
+                var json = Newtonsoft.Json.JsonConvert.SerializeObject(inner);
+                this.InnerException = Newtonsoft.Json.JsonConvert.DeserializeObject<DotRpcErrorPayload>(json);
+            };
+        }
+
+        public DotRpcError(DotRpcErrorPayload error)
+            : base(error.Message, error.InnerException is null ? null : new DotRpcError(error.InnerException))
+        {
+            this.Message = error.Message;
+            this.TypeName = error.TypeName;
+            this.StackTrace = error.StackTrace;
+            this.Details = error.Details;
+            InnerException = error.InnerException;
+        }
+
+        public string Message { get; set; }
+        public string TypeName { get; set; }
+        public new string StackTrace { get; set; }
+        public string Details { get; set; }
+        public new DotRpcErrorPayload? InnerException { get; set; }
+    }
+    public class DotRpcRequest
+    {
+        public DotRpcRequest() { }
+        public DotRpcRequest(IDataContract contract,
+            string[] methodArgumentTypes)
+        {
+            Contract = contract;
+            MethodArgumentTypes = methodArgumentTypes; ;
+        }
+
+
+        public virtual object Contract { get; set; }
+
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[] MethodArgumentTypes { get; set; }
+
+        public object?[] ToArray()
+        {
+            return MethodArgumentTypes.Select(x => (object)x).ToArray();
+        }
+    }
+
+    public class DotRpcGenericServiceRequest : DotRpcRequest
+    {
+        public DotRpcGenericServiceRequest() { }
+        public DotRpcGenericServiceRequest(IDataContract contract,
+            string[] methodArgumentTypes,
+            string[] typeArgumentsTypes)
+            : base(contract, methodArgumentTypes)
+        {
+            this.TypeArgumentsTypes = typeArgumentsTypes;
+            //Contract = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(contract));// Newtonsoft.Json.JsonConvert.SerializeObject(contract);
+
+        }
+
+
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[] TypeArgumentsTypes { get; set; }
+    }
+
+    public class DotRpcRequest<T> : DotRpcRequest
+    {
+
+        public T Contract { get; set; }
+        public DotRpcRequest()
+        {
+
+        }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[]? MethodArgumentTypes { get; set; }
+
+
+    }
+
+    public class DotRpcGenericRequest<T> : DotRpcRequest
+    {
+
+        public DotRpcGenericRequest()
+        { }
+
+
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[]? TypeArgumentsTypes { get; set; }
+    }
+
+
+    public class GenericArgumentTypes : IDataContract
+    {
+        public GenericArgumentTypes() { }
+        public GenericArgumentTypes(object[]? argumentTypes)
+            : this(argumentTypes?.Select(x => x?.ToString()).ToArray())
+        {
+
+        }
+        public string[] ArgumentTypes { get; set; }
+
+        public GenericArgumentTypes(string[] argumentTypes)
+        {
+            ArgumentTypes = argumentTypes;
+        }
+
+        public object?[] ToArray()
+        {
+            return ArgumentTypes.Select(x => (object)x).ToArray();
+        }
+    }
+    public class GenericArgumentTypes1 : IDataContract//, IEnumerable<string>
+    {
+        public GenericArgumentTypes1() { }
+        public GenericArgumentTypes1(object[]? argumentTypes)
+            : this(argumentTypes?.Select(x => x?.ToString()).ToArray())
+        {
+
+        }
+        public GenericArgumentTypes1(string?[]? argumentTypes)
+        {
+            if (argumentTypes is null || argumentTypes.Any(x => string.IsNullOrEmpty(x)))
+            {
+                throw new ArgumentNullException(nameof(argumentTypes), $"Argument Types cannot be null and must contain nonempty string values");
+            }
+            if (argumentTypes != null && argumentTypes.Length > 0)
+            {
+                Arg0 = argumentTypes.Length > 0 ? argumentTypes[0] : null;
+                Arg1 = argumentTypes.Length > 1 ? argumentTypes[1] : null;
+                Arg2 = argumentTypes.Length > 2 ? argumentTypes[2] : null;
+                Arg3 = argumentTypes.Length > 3 ? argumentTypes[3] : null;
+                Arg4 = argumentTypes.Length > 4 ? argumentTypes[4] : null;
+                Arg5 = argumentTypes.Length > 5 ? argumentTypes[5] : null;
+                Arg6 = argumentTypes.Length > 6 ? argumentTypes[6] : null;
+                Arg7 = argumentTypes.Length > 7 ? argumentTypes[7] : null;
+                Arg8 = argumentTypes.Length > 8 ? argumentTypes[8] : null;
+                Arg9 = argumentTypes.Length > 9 ? argumentTypes[9] : null;
+                Arg10 = argumentTypes.Length > 10 ? argumentTypes[10] : null;
+                Arg11 = argumentTypes.Length > 11 ? argumentTypes[11] : null;
+                Arg12 = argumentTypes.Length > 12 ? argumentTypes[12] : null;
+                Arg13 = argumentTypes.Length > 13 ? argumentTypes[13] : null;
+                Arg14 = argumentTypes.Length > 14 ? argumentTypes[14] : null;
+                Arg15 = argumentTypes.Length > 15 ? argumentTypes[15] : null;
+            }
+        }
+
+        public object[] ToArray()
+        {
+            return ArgumentsArray().Select(x => (object)x).ToArray();
+        }
+
+        public List<string> ArgumentsArray()
+        {
+            return (new[] { Arg0, Arg1, Arg2, Arg3, Arg4, Arg5, Arg6, Arg7, Arg8, Arg9, Arg10, Arg11, Arg12, Arg13, Arg14, Arg15 })
+                .TakeWhile(x => !string.IsNullOrEmpty(x)).Select(x => x ?? "").ToList();
+        }
+
+
+        public string? Arg0 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg1 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg2 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg3 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg4 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg5 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg6 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg7 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg8 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg9 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg10 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg11 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg12 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg13 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg14 { get; set; }
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Arg15 { get; set; }
+
     }
 }
