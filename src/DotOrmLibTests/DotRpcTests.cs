@@ -594,9 +594,9 @@ namespace DotRpc.DotOrmLibTests
             Assert.IsTrue(items.Any());
             Assert.IsTrue(items.Any(x => x.Id == app.Id));
 
-            items = client.Service.GetByIds(new[] { app.Id });
-            Assert.IsTrue(items.Any());
-            Assert.IsTrue(items.Any(x => x.Id == app.Id));
+            //items = client.Service.GetByIds(new[] { app.Id });
+            //Assert.IsTrue(items.Any());
+            //Assert.IsTrue(items.Any(x => x.Id == app.Id));
 
             //remove a key that does exists, ignoring case
             boolResult = client.Service.Delete(app.Id);
@@ -659,9 +659,9 @@ namespace DotRpc.DotOrmLibTests
             Assert.IsTrue(items.Any());
             Assert.IsTrue(items.Any(x => x.Id == app.Id));
 
-            items = client.Service.GetByIds(new[] { app.Id });
-            Assert.IsTrue(items.Any());
-            Assert.IsTrue(items.Any(x => x.Id == app.Id));
+            //items = client.Service.GetByIds(new[] { app.Id });
+            //Assert.IsTrue(items.Any());
+            //Assert.IsTrue(items.Any(x => x.Id == app.Id));
 
             //remove a key that does exists, ignoring case
             boolResult = client.Service.Delete(app.Id);

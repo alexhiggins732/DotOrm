@@ -34,7 +34,7 @@ namespace DotRpc.TestCommon
             int Add(TEntityOfInt entity);
             bool Delete(int key);
             IEnumerable<TEntityOfInt> GetAll();
-            IEnumerable<TEntityOfInt> GetByIds(IEnumerable<int> keys, int skip = 0, int take = 100);
+            //IEnumerable<TEntityOfInt> GetByIds(IEnumerable<int> keys, int skip = 0, int take = 100);
             IEnumerable<TEntityOfInt> GetByPage(int skip = 0, int take = 100);
             TEntityOfInt? GetFirst(int key);
             IEnumerable<TEntityOfInt> Query(string filter, int skip = 0, int take = 100);
