@@ -149,12 +149,26 @@ namespace DotRpc
                     {
                         return contract[serviceMethod];
                     }
-                    else if (serviceMethod.IsGenericMethod)
+                    else// if (serviceMethod.IsGenericMethod)
                     {
+                        var methodArgs = serviceMethod.GetParameters();
                         foreach (var kvp in contract)
                         {
                             if (kvp.Key.Name == serviceMethod.Name)
-                                return kvp.Value;
+                            {
+                                if (kvp.Key == serviceMethod)
+                                {
+                                    return kvp.Value;
+                                }
+                                var valueArgs = kvp.Key.GetParameters();
+                                //TODO: match generic parameter types to method.
+                                if (valueArgs.Length == methodArgs.Length)
+                                {
+                                    return kvp.Value;
+                                }
+                                //if (kvp.Key..)
+                            }
+                           
                         }
                     }
                 }
@@ -265,7 +279,7 @@ namespace DotRpc
             configure?.Invoke(app);
             return app;
         }
-        
+
         public static WebApplication UseDotRpcFromAssembly(
         this WebApplication app,
         Assembly assembly,

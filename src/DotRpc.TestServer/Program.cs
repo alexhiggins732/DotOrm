@@ -8,6 +8,9 @@ using System.Collections.Generic;
 using Swashbuckle.AspNetCore.SwaggerGen;
 using System.Reflection;
 using DotRpc.TestCommon.IamCrudService;
+using ProtoBuf.Grpc.Server;
+using System.Net;
+using Newtonsoft.Json;
 
 namespace DotRpc.TestServer
 {
@@ -17,9 +20,37 @@ namespace DotRpc.TestServer
 
         static void Main(string[] args)
         {
-            bool IsTest = args.Any(x => x.Equals("test", StringComparison.OrdinalIgnoreCase));
-            Server.RunServer(args, IsTest);
+            Log.Info("Starting server");
+            try
+            {
+                bool IsTest = args.Any(x => x.Equals("test", StringComparison.OrdinalIgnoreCase));
 
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                Server.RunServer(args, IsTest);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Unhandled Exception: {ex}");
+            }
+
+        }
+    }
+    public class Log
+    {
+        public static void Info(string message, bool appendDate = true)
+        {
+            if (appendDate)
+                message = $"{DateTime.Now} {message}";
+            Console.Write(message);
+            File.AppendAllLines("log.txt", new[] { message });
+        }
+        public static void Error(string message, bool appendDate = true)
+        {
+            if (appendDate)
+                message = $"{DateTime.Now} [Error] {message}";
+            else message = $"[Error] {message}";
+            Console.Write(message);
+            File.AppendAllLines("log.txt", new[] { message });
         }
     }
     public partial class Server
@@ -39,13 +70,13 @@ namespace DotRpc.TestServer
             services.AddSingleton<IRpcTestService, RpcTestService>();
             services.AddSingleton<IRpcTestServiceWithRequests, RpcTestServiceWithRequests>();
             services.AddSingleton<IRpcGenericTestService, RpcGenericTestService>();
-            services.AddSingleton<IIntEntityCrudService<App>,IntEntityCrudService<App>>();
+            services.AddSingleton<IIntEntityCrudService<App>, IntEntityCrudService<App>>();
             services.AddSingleton<IAppCrudService, AppCrudService>();
             services.AddHttpContextAccessor();
             services.AddEndpointsApiExplorer();
 
             services.AddDotRpcSwagger();
-
+            services.AddCodeFirstGrpc();
 
             var app = builder.Build();
 
@@ -57,7 +88,7 @@ namespace DotRpc.TestServer
             app.UseSwagger();
             app.UseSwaggerUI();
             // Configure the HTTP request pipeline.
-
+            app.MapGrpcService<RpcTestServiceWithRequests>();
             app.MapGet("/Scc1/TblScoringController", () => "Communication with DotRpc endpoints must be made through a DotRpc client. To learn how to create a client, visit: https://go.microsoft.com/fwlink/?linkid=2086909");
             WebApplication = app;
             if (!IsTest)
@@ -177,31 +208,49 @@ namespace DotRpc.TestServer
 
 
 
-        public bool Add(AddValueRequest request)
+        public ApiBoolResponse Add(AddValueRequest request)
         {
-            return _cache.TryAdd(request.Key, request.Value);
+            Log.Info($"Processing request: {JsonConvert.SerializeObject(request)}");
+            try
+            {
+                var result = _cache.TryAdd(request.Key, request.Value);
+                var response = new ApiBoolResponse { Value = result };
+                Log.Info($"Returning response request: {JsonConvert.SerializeObject(response)}");
+                return response;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Unhanled exception: {ex}");
+
+                var response = new ApiBoolResponse { Value = false };
+                return response;
+            }
+         
         }
 
-        public string? Get(GetValueRequest request)
+        public ApiStringResponse Get(GetValueRequest request)
         {
             _cache.TryGetValue(request.Key, out var value);
-            return value;
+            return new ApiStringResponse { Value = value };
         }
 
-        public string GetOrAdd(GetOrAddValueRequest request)
+        public ApiStringResponse GetOrAdd(GetOrAddValueRequest request)
         {
-            return _cache.GetOrAdd(request.Key, request.Value);
+            var value = _cache.GetOrAdd(request.Key, request.Value);
+            return new ApiStringResponse { Value = value };
         }
 
-        public bool Remove(RemoveValueRequest request)
+        public ApiBoolResponse Remove(RemoveValueRequest request)
         {
-            return _cache.TryRemove(request.Key, out var value);
+            var result = _cache.TryRemove(request.Key, out var value);
+            return new ApiBoolResponse { Value = result };
 
         }
 
-        public bool Set(SetValueRequest request)
+        public ApiBoolResponse Set(SetValueRequest request)
         {
-            return _cache.TryUpdate(request.Key, request.Value, request.Key);
+            var result = _cache.TryUpdate(request.Key, request.Value, request.Key);
+            return new ApiBoolResponse { Value = result };
         }
     }
 }

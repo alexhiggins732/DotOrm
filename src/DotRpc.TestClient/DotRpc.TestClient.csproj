@@ -8,7 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Grpc.Net.Client" Version="2.57.0" />
     <PackageReference Include="Moq" Version="4.20.69" />
+    <PackageReference Include="protobuf-net.Grpc" Version="1.1.1" />
   </ItemGroup>
 
   <ItemGroup>
