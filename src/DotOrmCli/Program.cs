@@ -20,6 +20,11 @@ namespace DotOrm
 
         private static void ScaffoldDb(string dbName)
         {
+            if (bool.Parse(bool.TrueString))
+            {
+                throw new Exception("This is a test exception");
+            }
+               
             var conn = ConnectionStringProvider.Create(dbName).ConnectionString;
 
 

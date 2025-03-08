@@ -232,7 +232,7 @@ namespace DotOrmLib
                 {
                     //idNotFoundErrorMessage = $"Failed to find id or key columns for model {Model.TableName}";
                     //throw new Exception($"Failed to find id or key columns for model {Model.TableName}");
-                    defaultSort= string.Join(", ", keys.Select(key => $"[{key.Name}]"));
+                    defaultSort = "newid()"; // string.Join(", ", keys.Select(key => $"[{key.Name}]"));
                 }
             }
             var selectClauses = Model.Columns.Select(x => $"[{x.Name}] as [{x.PropertyName}]");
@@ -431,6 +431,11 @@ namespace DotOrmLib
             {
                 if (idNotFoundErrorMessage is not null && defaultSort is null)
                     throw new Exception($"Identity or key sort not defined on type: {typeof(T).Name}");
+
+                DynamicParameters? param = GetDynamicParameters(parameterJson);
+                if (string.IsNullOrEmpty(defaultSort))
+                    defaultSort = "1";
+
                 var delim = " from ";
                 var idx = selectClause.IndexOf(delim);
                 var preamble = selectClause.Substring(0, idx);
@@ -443,7 +448,9 @@ namespace DotOrmLib
                 ({preamble})
                 t  WHERE DotOrmRowNumber BETWEEN {skip} AND {skip + take}";
 
-                DynamicParameters? param = GetDynamicParameters(parameterJson);
+              
+
+              
 
                 using (var conn = new SqlConnection(connectionString))
                 {

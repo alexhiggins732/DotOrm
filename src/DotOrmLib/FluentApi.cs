@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Reflection.Metadata.Ecma335;
 using System.Runtime.Serialization;
 using System.Text;
@@ -107,6 +108,8 @@ namespace DotOrmLib
                 return node;
             }
 
+
+
             protected override Expression VisitConstant(ConstantExpression node)
             {
                 if (node.Value is not null)
@@ -121,18 +124,48 @@ namespace DotOrmLib
 
             protected override Expression VisitMember(MemberExpression node)
             {
-                if (node.NodeType == ExpressionType.MemberAccess)
+                //if (node.NodeType == ExpressionType.MemberAccess)
+                //{
+
+                //    var member = node.Member;
+                //    if (member.DeclaringType == typeof(T))
+                //    {
+                //        var columnName = repo.Model.TryGetColumnNameByProperty(member.Name);
+                //        _sb.Append($"[{columnName}]");
+                //        return node;
+                //    }
+                //}
+                //_sb.Append(node.Member.Name);
+
+                // Typically, for x => x.Property, node.Expression.NodeType == ExpressionType.Parameter
+                // We want the column name from the DotOrmRepo's model mapping.
+                if (node.Expression is { NodeType: ExpressionType.Parameter })
                 {
-                    var member = node.Member;
-                    if (member.DeclaringType == typeof(T))
-                    {
-                        var columnName = repo.Model.TryGetColumnNameByProperty(member.Name);
-                        _sb.Append($"[{columnName}]");
-                        return node;
-                    }
+                    // This is a property on T
+                    var columnName = repo.Model.TryGetColumnNameByProperty(node.Member.Name);
+                    // e.g. StreetSuffix => "StreetSuffix"
+                    _sb.Append(columnName);
+                    return node;
                 }
-                _sb.Append(node.Member.Name);
+
+                // If it's some other member (like a local variable), the C# compiler often represents
+                // that as a MemberExpression on a closure object. We can evaluate it if needed:
+                object? value = Expression.Lambda(node).Compile().DynamicInvoke();
+
+                if (value == null)
+                {
+                    _sb.Append("null");
+                }
+                else
+                {
+                    // Parameter naming with @p_#
+                    string paramName = $"@p_{builder.parameters.Count}";
+                    builder.parameters.Add(paramName, value);
+                    _sb.Append(paramName);
+                }
+
                 return node;
+
             }
 
             private string GetOperator(ExpressionType nodeType, Expression rightNode)

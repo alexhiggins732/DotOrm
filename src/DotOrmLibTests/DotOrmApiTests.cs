@@ -81,6 +81,41 @@ namespace DotOrmLibTests
         }
 
         [TestMethod]
+        public async Task TestWhereClauseBuilder(string standardRoadSuffix = "RD")
+        {
+            await TestWhereClauseBuilderInternal(standardRoadSuffix);
+        }
+
+        async Task TestWhereClauseBuilderInternal(string standardRoadSuffix)
+        {
+            var StreetSuffix = "ST";
+            const string LaneSuffix = "LN";
+
+            using var channel = GrpcChannel.ForAddress("https://localhost:57057");
+
+            var client = channel.CreateGrpcService<IAddressSuffixController>();
+
+            var repo = new DotOrmRepo<AddressSuffix>(ConnectionStringProvider.Create().ConnectionString);
+            var where = repo.Where(x => x.StreetSuffix == StreetSuffix && x.CommonSuffix == LaneSuffix && x.StandardSuffix == standardRoadSuffix);
+
+
+            (string whereClause, Dictionary<string, object?> parameters) filter = where.Build();
+
+            Assert.AreEqual("where StreetSuffix = @StreetSuffix and CommonSuffix = @CommonSuffix  and StandardSuffix = @StandardSuffix".ToLower()
+                , filter.whereClause.ToLower());
+
+            Assert.AreEqual(3, filter.parameters.Count);
+            Assert.IsTrue(filter.parameters.ContainsKey("@p_0"));
+            Assert.IsTrue(filter.parameters.ContainsKey("@p_1"));
+            Assert.IsTrue(filter.parameters.ContainsKey("@p_2"));
+
+            Assert.IsTrue(filter.whereClause.Contains("StreetSuffix = @p_0"));
+            Assert.IsTrue(filter.whereClause.Contains("CommonSuffix = @p_1"));
+            Assert.IsTrue(filter.whereClause.Contains("StandardSuffix = @p_2"));
+        }
+
+
+        [TestMethod]
         public async Task TestAddGetDeleteWithoutKeyOrId()
         {
             using var channel = GrpcChannel.ForAddress("https://localhost:57057");
@@ -89,6 +124,8 @@ namespace DotOrmLibTests
             var StreetSuffix = "SPACEX";
             var CommonSuffix = "SPACEX";
             var StandardSuffix = "SPCX";
+
+            await Task.Delay(20000);
 
            var rpcResult= await client.Add(new AddressSuffix { StreetSuffix=StreetSuffix, CommonSuffix=CommonSuffix, StandardSuffix=StandardSuffix });
 

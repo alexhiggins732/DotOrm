@@ -18,7 +18,7 @@ services.AddSwaggerGen(c =>
 var app = builder.Build();
 
 
-app.AddDotRpcFromAssembly(typeof(IKeyValueStore).Assembly);
+app.UseDotRpcFromAssembly(typeof(IKeyValueStore).Assembly);
 app.UseSwagger();
 app.UseSwaggerUI();
 

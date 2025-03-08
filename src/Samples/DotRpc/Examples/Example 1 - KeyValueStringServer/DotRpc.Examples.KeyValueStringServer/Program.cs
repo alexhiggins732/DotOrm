@@ -1,5 +1,5 @@
 ﻿using DotRpc;
-
+using DotRpc.RpcClient;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,7 +18,7 @@ services.AddSwaggerGen(c =>
 var app = builder.Build();
 
 
-app.AddDotRpcFromAssembly(typeof(Program).Assembly);
+app.UseDotRpcFromAssembly(typeof(Program).Assembly);
 app.UseSwagger();
 app.UseSwaggerUI();
 

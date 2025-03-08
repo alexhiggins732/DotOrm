@@ -116,6 +116,14 @@ namespace DotRpc.DotOrmLibTests
             Assert.AreEqual(method.MetadataToken, cache[method]);
         }
 
+        void AssertAddFail(Dictionary<MethodInfo, int> cache, MethodInfo method)
+        {
+            Assert.IsNotNull(method);
+            Assert.IsTrue(cache.ContainsKey(method));
+            Assert.ThrowsException<ArgumentException>(() => cache.Add(method, method.MetadataToken));
+            Assert.AreEqual(method.MetadataToken, cache[method]);
+        }
+
         [TestMethod]
         public void TestGenericMethod()
         {
@@ -151,7 +159,7 @@ namespace DotRpc.DotOrmLibTests
 
 
                 var m2 = GetMethod(() => a.Get());
-                AssertAdd(d, m2);
+                AssertAddFail(d, m2);
 
                 var m3 = GetMethod(() => a.Get(1));
                 AssertAdd(d, m3);
@@ -167,13 +175,13 @@ namespace DotRpc.DotOrmLibTests
 
 
                 var m2 = GetMethod(() => a.Get());
-                AssertAdd(d, m2);
+                AssertAddFail(d, m2);
 
                 var m3 = GetMethod(() => a.Get(""));
                 AssertAdd(d, m3);
 
                 var m4 = GetMethod(() => a.Get(""));
-                AssertAdd(d, m4);
+                AssertAddFail(d, m4);
             }
 
 
@@ -253,7 +261,7 @@ namespace DotRpc.DotOrmLibTests
                     var m = GetMethod(() => a.Get<int, string>(1, 1, ""));
                     AssertAdd(d, m);
                 }
-            
+
 
                 {
                     var m = GetMethod(() => a.Get<int, int>(1, 1));
@@ -265,7 +273,7 @@ namespace DotRpc.DotOrmLibTests
                     AssertAdd(d, m);
                 }
 
-           
+
 
                 {
                     var m = GetMethod(() => a.Get<string, string>(1, 1));
@@ -383,7 +391,11 @@ namespace DotRpc.DotOrmLibTests
             TestMutex.WaitOne(); // Acquire the mutex
             var args = new string[] { };
             Server.RunServer(args, true);
-            var endpoint = Server.WebApplication.Urls.First(x => x.StartsWith("https", StringComparison.OrdinalIgnoreCase));
+            var endpoint = Server.WebApplication.Urls.FirstOrDefault(x => x.StartsWith("https", StringComparison.OrdinalIgnoreCase));
+            if (endpoint == null)
+                endpoint = Server.WebApplication.Urls.FirstOrDefault(x => x.StartsWith("http", StringComparison.OrdinalIgnoreCase));
+            if (endpoint == null)
+                throw new InvalidOperationException("Server not started");
             var services = new ServiceCollection();
             services.AddDotRpc();
             services.AddDotRpcClientsFromAssembly(typeof(IRpcTestService));

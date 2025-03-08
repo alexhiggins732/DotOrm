@@ -480,6 +480,7 @@ left join sys.tables refTable on refCol.object_id= refTable.object_id
                 b.AppendLine("using System.Data;");
                 b.AppendLine("using System.Runtime.Serialization;");
                 b.AppendLine("using System.ServiceModel;");
+                b.AppendLine("using DotOrmLib.GrpcServices;");
                 b.AppendLine($"using {@namespace}.Models;");
                 b.AppendLine($"using {@namespace}.Interfaces;");
                 b.AppendLine();
