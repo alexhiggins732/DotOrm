@@ -2,6 +2,7 @@
 using DotOrmLib;
 using DotOrmLib.Proxy;
 using DotOrmLib.Sql;
+using Newtonsoft.Json;
 using System.Reflection.Emit;
 using FlowControl = DotOrmLib.Proxy.ILRuntime.FlowControl;
 using TestModel = DotOrmLib.Proxy.ILRuntime.TestModel;
@@ -29,6 +30,16 @@ namespace DotOrm
 
 
             var def = DotOrmLib.Sql.ModelBuilder.GetDbSchema(dbName);
+      
+
+            var json = JsonConvert.SerializeObject(def, Formatting.Indented);
+
+
+            var dto = DbSchemaDto.Create(def);
+            // write dto to Json indented while skipping null objects
+            var dtoJson = JsonConvert.SerializeObject(dto, Formatting.Indented, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+
+
 
 
             var modelDirectory = GetModelDirectory();

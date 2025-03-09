@@ -864,6 +864,111 @@ left join sys.tables refTable on refCol.object_id= refTable.object_id
                         return typeof(object); // Default to object type if not recognized
                 }
             }
+            public static string MapSqlTypeToClrAlias(SqlDbType sqlDbType, bool isNullable = false)
+            {
+                switch (sqlDbType)
+                {
+                    case SqlDbType.BigInt:
+                        return isNullable ? ClrAlias.NullableLong : ClrAlias.Long;
+                    case SqlDbType.Binary:
+                    case SqlDbType.Image:
+                    case SqlDbType.Timestamp:
+                    case SqlDbType.VarBinary:
+                        return isNullable ? ClrAlias.NullableByteArray : ClrAlias.ByteArray;
+                    case SqlDbType.Bit:
+                        return isNullable ?  ClrAlias.NullableBool : ClrAlias.Bool;
+                    case SqlDbType.Char:
+                    case SqlDbType.NChar:
+                    case SqlDbType.NText:
+                    case SqlDbType.NVarChar:
+                    case SqlDbType.Text:
+                    case SqlDbType.VarChar:
+                    case SqlDbType.Xml:
+                        return isNullable ? ClrAlias.NullableString : ClrAlias.String;
+                    case SqlDbType.Date:
+                    case SqlDbType.DateTime:
+                    case SqlDbType.DateTime2:
+                    case SqlDbType.SmallDateTime:
+                        return isNullable ? ClrAlias.NullableDateTime : ClrAlias.DateTime;
+                    case SqlDbType.DateTimeOffset:
+                        return isNullable ? ClrAlias.NullableDateTimeOffset : ClrAlias.DateTimeOffset;
+                    case SqlDbType.Decimal:
+                    case SqlDbType.Money:
+                    case SqlDbType.SmallMoney:
+                        return isNullable ? ClrAlias.NullableDecimal : ClrAlias.Decimal;
+                    case SqlDbType.Real:
+                    case SqlDbType.Float:
+                        return isNullable ? ClrAlias.NullableFloat : ClrAlias.Float;
+                    case SqlDbType.Int:
+                        return isNullable ? ClrAlias.NullableInt : ClrAlias.Int;
+                    case SqlDbType.SmallInt:
+                        return isNullable ? ClrAlias.NullableShort : ClrAlias.Short;
+                    case SqlDbType.TinyInt:
+                        return isNullable ? ClrAlias.NullableByte : ClrAlias.Byte;  
+                    case SqlDbType.UniqueIdentifier:
+                        return isNullable ? ClrAlias.NullableGuid : ClrAlias.Guid;
+                    case SqlDbType.Time:
+                        return isNullable ? ClrAlias.NullableTimeSpan : ClrAlias.TimeSpan;
+
+                    case SqlDbType.Structured:
+                        return ClrAlias.DataTable; // typeof(DataTable); // Custom Structured Data Type
+                    case SqlDbType.Variant:
+                    case SqlDbType.Udt:
+                    default:
+                        return isNullable ? ClrAlias.NullableObject : ClrAlias.Object; //typeof(object);
+
+                }
+            }
+        }
+        public class ClrAlias
+        {
+            public const string Int = "int";
+            public const string Double = "double";
+            public const string Decimal = "decimal";
+            public const string String = "string";
+            public const string Bool = "bool";
+            public const string DateTime = "DateTime";
+            public const string DateTimeOffset = "DateTimeOffset";
+            public const string TimeSpan = "TimeSpan";
+            public const string Guid = "Guid";
+            public const string Byte = "byte";
+            public const string ByteArray = "byte[]";
+            public const string Char = "char";
+            public const string CharArray = "char[]";
+            public const string Float = "float";
+            public const string Long = "long";
+            public const string Short = "short";
+            public const string UInt = "uint";
+            public const string ULong = "ulong";
+            public const string UShort = "ushort";
+            public const string SByte = "sbyte";
+            public const string DataTable = "DataTable";
+            public const string Object = "object";
+
+            public const string NullableInt = "int?";
+            public const string NullableDouble = "double?";
+            public const string NullableDecimal = "decimal?";
+            public const string NullableString = "string?";
+            public const string NullableBool = "bool?";
+            public const string NullableDateTime = "DateTime?";
+            public const string NullableDateTimeOffset = "DateTimeOffset?";
+            public const string NullableTimeSpan = "TimeSpan?";
+            public const string NullableGuid = "Guid?";
+            public const string NullableByte = "byte?";
+            public const string NullableByteArray = "byte[]?";
+            public const string NullableChar = "char?";
+            public const string NullableCharArray = "char[]?";
+            public const string NullableFloat = "float?";
+            public const string NullableLong = "long?";
+            public const string NullableShort = "short?";
+            public const string NullableUInt = "uint?";
+            public const string NullableULong = "ulong?";
+            public const string NullableUShort = "ushort?";
+            public const string NullableSByte = "sbyte?";
+            public const string NullableDataTable = "DataTable?";
+            public const string NullableObject = "object?";
+
+
         }
         public static class Extensions
         {
